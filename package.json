@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "amqplib": "^2.0.1",
-    "dotenv": "^16.4.5",
+    "dotenv": "^17.4.2",
     "fastify": "^5.10.0",
     "mongoose": "^8.5.2",
     "oracledb": "^7.0.1",
