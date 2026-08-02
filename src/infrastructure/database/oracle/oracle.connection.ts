@@ -1,5 +1,5 @@
 import oracledb from 'oracledb';
-import { logger } from '../../logger/winston.logger';
+import { logger } from '@/infrastructure/logger/winston.logger';
 
 oracledb.outFormat = oracledb.OUT_FORMAT_OBJECT;
 oracledb.autoCommit = false;

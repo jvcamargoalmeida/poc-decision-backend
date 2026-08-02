@@ -1,5 +1,5 @@
 import amqplib, { type ChannelModel, type Channel } from 'amqplib';
-import { logger } from '../../logger/winston.logger';
+import { logger } from '@/infrastructure/logger/winston.logger';
 
 let connection: ChannelModel | undefined;
 let channel: Channel | undefined;

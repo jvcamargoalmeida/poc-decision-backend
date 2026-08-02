@@ -4,9 +4,9 @@
   "description": "Motor de Processamento Financeiro e de Estatisticas de Alta Volumetria (PoC)",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     "start": "node dist/server.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev": "ts-node-dev --respawn --transpile-only -r tsconfig-paths/register src/server.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],
@@ -29,6 +29,8 @@
     "@types/node": "^20.14.14",
     "@types/oracledb": "6.10.4",
     "ts-node-dev": "^2.0.0",
+    "tsc-alias": "1.9.1",
+    "tsconfig-paths": "4.2.0",
     "typescript": "^5.5.4"
   }
 }

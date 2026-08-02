@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { logger } from '../../logger/winston.logger';
+import { logger } from '@/infrastructure/logger/winston.logger';
 
 export async function connectMongo(): Promise<typeof mongoose> {
   const uri = process.env.MONGO_URI;

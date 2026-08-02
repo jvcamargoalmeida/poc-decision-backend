@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { healthPlugin } from '../plugins/health.plugin';
+import { healthPlugin } from '@/presentation/plugins/health.plugin';
 
 // TODO: registrar rotas de dominio (ex: transactions, statistics) aqui
 // conforme os Use Cases forem implementados manualmente.
