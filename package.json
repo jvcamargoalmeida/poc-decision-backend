@@ -20,7 +20,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "amqplib": "^0.10.4",
+    "amqplib": "^2.0.1",
     "dotenv": "^16.4.5",
     "fastify": "^4.28.1",
     "mongoose": "^8.5.2",
