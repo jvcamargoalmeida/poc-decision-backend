@@ -5,7 +5,7 @@ interface ITransactionRepository {
      * Salva uma nova transação no banco de dados.
      * @param transaction Entidade de transação com as regras de negócio aplicadas
     */
-    save(transaction: Transaction): Promise<void>;
+    save(transaction: Transaction): Promise<Transaction>;
 
     /**
      * Busca uma transação pelo seu ID.

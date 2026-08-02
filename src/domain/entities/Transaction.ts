@@ -1,10 +1,11 @@
 import { RiskLevel } from "../enums/RiskLevel";
+import { TransactionStatus } from "../enums/TransactionStatus";
 
 interface Transaction {
-    id: string;
+    id?: string;
     amount: number;
     currency: string;
-    status: string;
+    status: TransactionStatus;
     riskScore: RiskLevel;
     createdAt: Date;
 }
