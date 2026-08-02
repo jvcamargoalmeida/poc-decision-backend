@@ -64,7 +64,7 @@ Todo Pull Request para a branch `main` **DEVE** manter cobertura mínima de **95
 
 ### Pipeline (GitHub Actions)
 Definido em `.github/workflows/ci.yml`, disparado em todo `pull_request` (aberta, sincronizada ou reaberta) contra `main` e em todo `push` para `main`:
-- **`quality`:** `npm run typecheck` (inclui `src/` e `tests/` via `tsconfig.test.json`) e `npm run build`.
+- **`quality`:** `npm run typecheck` (`tsconfig.json`, cobre `src/` + `tests/` — é o config que o editor também enxerga) e `npm run build` (`tsconfig.build.json`, restrito a `src/` para o `dist/`).
 - **`test`:** `npm run test:coverage`, publica um resumo de cobertura no Job Summary e como comentário atualizável na PR, e sobe o relatório completo (`coverage/`) como artefato.
 - **`docker-compose-lint`:** valida a sintaxe do `docker-compose.yml` (`docker compose config`).
 - **`ci-status`:** job agregador que falha se qualquer um dos anteriores falhar — é o único *required status check* necessário na proteção de branch do `main`.
