@@ -1,5 +1,7 @@
 # 🚀 poc-decision-backend
 
+[![CI](https://github.com/jvcamargoalmeida/poc-decision-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/jvcamargoalmeida/poc-decision-backend/actions/workflows/ci.yml)
+
 O `poc-decision-backend` é um motor de processamento financeiro orientado a eventos, projetado especificamente para suportar alta volumetria e rigorosos requisitos de baixa latência. 
 
 Desenvolvido em **TypeScript** sobre o ecossistema **Fastify**, o projeto aplica rigorosamente os princípios de **Clean Architecture** e **Domain-Driven Design (DDD)**. Esta Prova de Conceito (PoC) demonstra a capacidade de orquestrar fluxos complexos, isolando regras de negócio e infraestrutura.
