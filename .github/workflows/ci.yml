@@ -63,7 +63,7 @@ jobs:
         run: npm run test:coverage
 
       - name: Publish coverage summary
-        if: always()
+        if: ${{ !cancelled() }}
         run: |
           node .github/scripts/coverage-summary.mjs \
             --summary "$GITHUB_STEP_SUMMARY" \
@@ -71,7 +71,7 @@ jobs:
             --out "$RUNNER_TEMP/coverage-comment.md"
 
       - name: Comment coverage on PR
-        if: always() && github.event_name == 'pull_request'
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         uses: actions/github-script@v7
         with:
           script: |
@@ -113,7 +113,7 @@ jobs:
             }
 
       - name: Upload coverage report
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
@@ -132,7 +132,7 @@ jobs:
 
   ci-status:
     name: CI Status
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [quality, test, docker-compose-lint]
     runs-on: ubuntu-latest
     steps:
