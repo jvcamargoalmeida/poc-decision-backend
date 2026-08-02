@@ -60,6 +60,7 @@ services:
       APP_USER_PASSWORD: transactionpassword
     volumes:
       - oracle-data:/opt/oracle/oradata
+      - ./db/oracle/init:/container-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "healthcheck.sh"]
       interval: 15s

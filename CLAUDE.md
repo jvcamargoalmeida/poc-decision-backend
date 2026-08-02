@@ -3,6 +3,8 @@
 ## 📌 Visão Geral
 Este repositório contém uma Prova de Conceito (PoC) para um Motor de Processamento Financeiro e de Estatísticas de Alta Volumetria. A arquitetura foi projetada para priorizar resiliência, baixa latência e uma separação estrita de responsabilidades usando princípios de Domain-Driven Design (DDD).
 
+Os requisitos funcionais/não funcionais (RF/RNF) e o mapeamento arquivo-a-arquivo de cada fase da transação (API → Oracle → MongoDB → RabbitMQ → n8n → Callback) são a fonte de verdade em [`SPECIFICATION.md`](SPECIFICATION.md). O progresso de implementação é rastreado em [`ROADMAP.md`](ROADMAP.md). Qualquer geração de código pela IA nos arquivos citados na `SPECIFICATION.md` continua sujeita aos limites da seção "Limites de Geração Automatizada de Código" abaixo.
+
 ## 🛠️ Stack Tecnológica
 - **Core HTTP:** Fastify (Node.js v20+ em TypeScript)
 - **Mensageria:** RabbitMQ (`amqplib`)

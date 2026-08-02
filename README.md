@@ -17,6 +17,15 @@ A arquitetura dispensa o uso de ORMs pesados em favor de drivers nativos e padr�
 * **Integração NoCode:** Orquestração de cálculos e algoritmos estatísticos externos via Webhooks comunicando-se com o **n8n**.
 * **Observabilidade (APM Ready):** Geração de logs estruturados em padrão estrito JSON através do **Winston**, prontos para ingestão em stacks de monitoramento como Datadog ou Elastic (ELK).
 
+## 🔄 Fluxo de Negócio (Visão Geral)
+
+1. **Ingestão síncrona:** `POST /transactions` → cálculo de risco interno (Strategy Pattern) → persistência no Oracle (SQL nativo) → resposta `201/202` imediata ao cliente, sem esperar processamento externo.
+2. **Auditoria e distribuição (assíncrono):** o payload bruto é gravado no MongoDB (data lake/compliance) e um evento "Transação Criada" é publicado no RabbitMQ.
+3. **Decisão externa:** um Worker consome a fila e dispara um Webhook para o **n8n**, que roda o fluxo visual de decisão (simulando engines de fraude/crédito).
+4. **Callback:** o n8n retorna a decisão via `POST /callback/transactions`, atualizando o status final da transação no Oracle.
+
+A especificação funcional/não funcional completa (RF/RNF) e o mapeamento arquivo-a-arquivo de cada fase estão em [`SPECIFICATION.md`](SPECIFICATION.md). O progresso real da implementação (o que já está pronto vs. planejado) está em [`ROADMAP.md`](ROADMAP.md).
+
 ## 📋 Pré-requisitos
 
 * [nvm](https://github.com/nvm-sh/nvm) — a versão do Node é fixada em [`.nvmrc`](.nvmrc)
@@ -55,13 +64,14 @@ O servidor sobe em `http://localhost:3000`; `GET /health` retorna o status da ap
 src/
 ├── domain/
 │   ├── entities/         # Transaction
-│   ├── enums/            # RiskLevel
+│   ├── enums/            # RiskLevel, TransactionStatus
 │   ├── repositories/     # ITransactionRepository (interface)
 │   └── strategies/risk/  # IRiskStrategy, AmountRiskStrategy
-├── application/          # Use Cases (a implementar)
-├── infrastructure/       # Oracle, Mongo, RabbitMQ, Winston (implementações)
+├── application/          # Use Cases (ProcessTransactionUseCase)
+├── infrastructure/       # Oracle (pool + repository), Mongo, RabbitMQ, Winston
 └── presentation/         # Servidor Fastify, rotas e plugins
 tests/                    # Testes unitários (espelha a estrutura de src/)
+db/oracle/init/           # Scripts .sql/.sh rodados na 1ª inicialização do Oracle (ver README na pasta)
 ```
 
 Os limites do que a IA pode gerar em cada camada estão documentados em [`CLAUDE.md`](CLAUDE.md).
@@ -79,3 +89,12 @@ Não há Dependabot no projeto (removido — atualizações de dependência são
 ## 🔐 Variáveis de ambiente
 
 Veja [`.env.example`](.env.example) para a lista completa (Oracle, MongoDB, RabbitMQ, n8n e configurações do servidor).
+
+## 📚 Documentação
+
+| Documento | Conteúdo |
+| --- | --- |
+| [`SPECIFICATION.md`](SPECIFICATION.md) | Requisitos funcionais/não funcionais (RF/RNF) e a jornada completa da transação, mapeada arquivo a arquivo |
+| [`ROADMAP.md`](ROADMAP.md) | Progresso real da implementação, fase a fase |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Diagramas de eventos, entidades e sistema (Mermaid) |
+| [`CLAUDE.md`](CLAUDE.md) | Padrões de engenharia e limites de geração automatizada de código por IA |
