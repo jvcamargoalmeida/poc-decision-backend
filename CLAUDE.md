@@ -72,10 +72,10 @@ Definido em `.github/workflows/ci.yml`, disparado em todo `pull_request` (aberta
 O merge da PR só deve ser liberado no GitHub (Settings → Branches → Branch protection rules) com `ci-status` marcado como *required*. Configuração de proteção de branch não é versionada em arquivo — precisa ser aplicada manualmente (ou via `gh api`) no repositório.
 
 ### Fixação do TypeScript (`ts-node-dev` sem manutenção)
-`ts-node-dev`/`ts-node` (usados em `npm run dev`) não recebem atualização desde 2022 e não suportam majors novos do TypeScript — um bump automático para o TS 7.x quebra `npm run dev` (`TypeError` dentro do `ts-node`) mesmo com `typecheck`/`build`/`test` passando normalmente, pois nenhum deles exercita o `ts-node-dev`. Por isso:
-- `typescript` fica travado em `^6.0.3` (não `^7.x`) até o projeto migrar para uma ferramenta de dev mantida (ex.: `tsx`) ou `ts-node-dev` ganhar suporte ao TS 7.
-- `dependabot.yml` ignora explicitamente atualizações de major do `typescript`.
-- O smoke test do `npm run dev` no job `quality` existe justamente para pegar esse tipo de quebra antes do merge, já que Dependabot pode propor (e alguém pode aceitar) um major bump mesmo com essa exclusão manual.
+`ts-node-dev`/`ts-node` (usados em `npm run dev`) não recebem atualização desde 2022 e não suportam majors novos do TypeScript — um bump para o TS 7.x quebra `npm run dev` (`TypeError` dentro do `ts-node`) mesmo com `typecheck`/`build`/`test` passando normalmente, pois nenhum deles exercita o `ts-node-dev`. Por isso `typescript` fica travado em `^6.0.3` (não `^7.x`) até o projeto migrar para uma ferramenta de dev mantida (ex.: `tsx`) ou `ts-node-dev` ganhar suporte ao TS 7. O smoke test do `npm run dev` no job `quality` existe justamente para pegar esse tipo de quebra antes do merge.
+
+### Atualização de Dependências (sem Dependabot)
+O projeto **não usa Dependabot** (removido — `.github/dependabot.yml` não existe mais). Na prática, ele abriu ~11 PRs de uma vez na primeira execução, incluindo majors que quebram compatibilidade (`amqplib` 0.10→2.0, `fastify` 4→5, `oracledb` 6→7, `typescript` 6→7), e o volume de PRs/merges em sequência rápida chegou a saturar a fila de runners do GitHub Actions — mais atrapalho que ajuda para um projeto deste tamanho. Atualizações de dependência devem ser feitas manualmente (`npm outdated`, bump deliberado + validação local completa antes de commitar), uma de cada vez.
 
 ### Restrição para Testes Gerados por IA
 As mesmas restrições da seção **"Escopos Restritos"** acima se aplicam à escrita de testes: agentes de IA podem escrever testes unitários completos para código de infraestrutura/apresentação (escopo aprovado), mas **não devem** inventar expectativas de regras de negócio para código de domínio/aplicação que não foi implementado por eles. Testes para lógica de negócio manual são responsabilidade do engenheiro responsável — a cobertura desse código, contudo, ainda conta para o gate de 95%.
