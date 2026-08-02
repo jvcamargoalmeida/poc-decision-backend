@@ -40,6 +40,22 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Dev script smoke test
+        run: |
+          npm run dev &
+          DEV_PID=$!
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:3000/health > /dev/null; then
+              echo "Dev server (ts-node-dev) responded successfully."
+              kill "$DEV_PID"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Dev server did not respond within 15s."
+          kill "$DEV_PID" 2>/dev/null || true
+          exit 1
+
   test:
     name: Unit Tests & Coverage
     runs-on: ubuntu-latest
