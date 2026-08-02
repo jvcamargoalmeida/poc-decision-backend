@@ -47,3 +47,29 @@ Restrições específicas incluem:
 - **Consumidores de Fila (Workers):** Gere a configuração do *listener*, mas o processamento da mensagem e o roteamento entre as ferramentas (n8n/Bancos) devem permanecer vazios.
 
 *Nota: A lógica de negócios central, modelagem de banco de dados estruturada e invariantes de domínio são implementados manualmente pelo engenheiro responsável.*
+
+---
+
+## 🚦 CI/CD e Cobertura de Testes
+
+### Ferramenta de Testes
+- **Framework:** [Vitest](https://vitest.dev/) com provider de cobertura `@vitest/coverage-v8`.
+- **Configuração:** `vitest.config.mts`, na raiz do projeto.
+- **Scripts:** `npm test` (execução única), `npm run test:watch` (modo watch) e `npm run test:coverage` (execução com relatório de cobertura).
+
+### Gate de Cobertura (95%)
+Todo Pull Request para a branch `main` **DEVE** manter cobertura mínima de **95%** nas quatro métricas (statements, branches, functions e lines), configurada em `coverage.thresholds` no `vitest.config.mts`. O comando `vitest run --coverage` falha (exit code não-zero) automaticamente se qualquer métrica ficar abaixo do limiar — esse é o mecanismo real de enforcement, não apenas uma checagem informativa.
+
+`src/server.ts` (bootstrap fino que chama `app.listen`) é excluído da cobertura por não ter valor de teste unitário; ao ganhar lógica própria, deve ser removido da exclusão em `coverage.exclude`.
+
+### Pipeline (GitHub Actions)
+Definido em `.github/workflows/ci.yml`, disparado em todo `pull_request` (aberta, sincronizada ou reaberta) contra `main` e em todo `push` para `main`:
+- **`quality`:** `npm run typecheck` (inclui `src/` e `tests/` via `tsconfig.test.json`) e `npm run build`.
+- **`test`:** `npm run test:coverage`, publica um resumo de cobertura no Job Summary e como comentário atualizável na PR, e sobe o relatório completo (`coverage/`) como artefato.
+- **`docker-compose-lint`:** valida a sintaxe do `docker-compose.yml` (`docker compose config`).
+- **`ci-status`:** job agregador que falha se qualquer um dos anteriores falhar — é o único *required status check* necessário na proteção de branch do `main`.
+
+O merge da PR só deve ser liberado no GitHub (Settings → Branches → Branch protection rules) com `ci-status` marcado como *required*. Configuração de proteção de branch não é versionada em arquivo — precisa ser aplicada manualmente (ou via `gh api`) no repositório.
+
+### Restrição para Testes Gerados por IA
+As mesmas restrições da seção **"Escopos Restritos"** acima se aplicam à escrita de testes: agentes de IA podem escrever testes unitários completos para código de infraestrutura/apresentação (escopo aprovado), mas **não devem** inventar expectativas de regras de negócio para código de domínio/aplicação que não foi implementado por eles. Testes para lógica de negócio manual são responsabilidade do engenheiro responsável — a cobertura desse código, contudo, ainda conta para o gate de 95%.
