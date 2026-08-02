@@ -53,11 +53,15 @@ O servidor sobe em `http://localhost:3000`; `GET /health` retorna o status da ap
 
 ```text
 src/
-├── domain/           # Entities, repositories (interfaces) e strategies
-├── application/       # Use Cases
-├── infrastructure/    # Oracle, Mongo, RabbitMQ, Winston (implementações)
-└── presentation/      # Servidor Fastify, rotas e plugins
-tests/                 # Testes unitários (espelha a estrutura de src/)
+├── domain/
+│   ├── entities/         # Transaction
+│   ├── enums/            # RiskLevel
+│   ├── repositories/     # ITransactionRepository (interface)
+│   └── strategies/risk/  # IRiskStrategy, AmountRiskStrategy
+├── application/          # Use Cases (a implementar)
+├── infrastructure/       # Oracle, Mongo, RabbitMQ, Winston (implementações)
+└── presentation/         # Servidor Fastify, rotas e plugins
+tests/                    # Testes unitários (espelha a estrutura de src/)
 ```
 
 Os limites do que a IA pode gerar em cada camada estão documentados em [`CLAUDE.md`](CLAUDE.md).
@@ -68,7 +72,9 @@ O projeto usa **Vitest**. Todo Pull Request para `main` precisa manter cobertura
 
 ## ⚙️ CI/CD
 
-O pipeline (`.github/workflows/ci.yml`) roda em todo Pull Request e push para `main`: typecheck, build, testes com cobertura (com resumo comentado na PR) e validação do `docker-compose.yml`. O merge só deve ser liberado com o check `ci-status` obrigatório na proteção da branch `main`.
+O pipeline (`.github/workflows/ci.yml`) roda em todo Pull Request e push para `main`: typecheck, build, smoke test do `npm run dev`, testes com cobertura (com resumo comentado na PR) e validação do `docker-compose.yml`. O merge só deve ser liberado com o check `ci-status` obrigatório na proteção da branch `main`.
+
+Não há Dependabot no projeto (removido — atualizações de dependência são feitas manualmente, uma de cada vez). Detalhes em [`CLAUDE.md`](CLAUDE.md).
 
 ## 🔐 Variáveis de ambiente
 
