@@ -1,0 +1,92 @@
+version: '3.8'
+
+networks:
+  transaction-net:
+    driver: bridge
+
+volumes:
+  rabbitmq-data:
+  mongo-data:
+  oracle-data:
+  n8n-data:
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: transaction-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: adminpassword
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - transaction-net
+
+  mongodb:
+    image: mongo:latest
+    container_name: transaction-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: adminpassword
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - transaction-net
+
+  oracle-xe:
+    image: gvenzl/oracle-xe:slim
+    container_name: transaction-oracle-xe
+    restart: unless-stopped
+    ports:
+      - "1521:1521"
+    environment:
+      ORACLE_PASSWORD: oraclepassword
+      APP_USER: transaction_app
+      APP_USER_PASSWORD: transactionpassword
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    networks:
+      - transaction-net
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: transaction-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - GENERIC_TIMEZONE=America/Sao_Paulo
+    volumes:
+      - n8n-data:/home/node/.n8n
+    depends_on:
+      - rabbitmq
+      - mongodb
+      - oracle-xe
+    networks:
+      - transaction-net
