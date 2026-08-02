@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
-import { logger } from './infrastructure/logger/winston.logger';
-import { registerRoutes } from './presentation/routes';
+import { logger } from '@/infrastructure/logger/winston.logger';
+import { registerRoutes } from '@/presentation/routes';
 
 const app = Fastify({
   logger: false,
