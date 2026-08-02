@@ -73,3 +73,27 @@ O merge da PR só deve ser liberado no GitHub (Settings → Branches → Branch 
 
 ### Restrição para Testes Gerados por IA
 As mesmas restrições da seção **"Escopos Restritos"** acima se aplicam à escrita de testes: agentes de IA podem escrever testes unitários completos para código de infraestrutura/apresentação (escopo aprovado), mas **não devem** inventar expectativas de regras de negócio para código de domínio/aplicação que não foi implementado por eles. Testes para lógica de negócio manual são responsabilidade do engenheiro responsável — a cobertura desse código, contudo, ainda conta para o gate de 95%.
+
+---
+
+## 🏷️ Commits, Labels e Quando Dispensar Branch
+
+### Prefixos de commit → Labels de PR
+Commits seguem o formato `tipo: descrição`. Cada tipo usado nos commits de uma PR **DEVE** ter a label correspondente aplicada na PR, sem precisar de ação manual do engenheiro:
+
+| Prefixo do commit | Label da PR |
+| --- | --- |
+| `feat` | `feature` |
+| `fix` | `fix` |
+| `chore` | `chore` |
+| `ci` | `ci` |
+| `docs` | `docs` |
+| `test` | `test` |
+
+Regras:
+- Uma PR com commits de mais de um tipo recebe todas as labels correspondentes.
+- Se surgir um prefixo novo ainda não mapeado nesta tabela (ex.: `refactor`, `perf`, `build`, `revert`), a label correspondente deve ser criada no momento (mesmo nome do prefixo) e esta tabela deve ser atualizada com a nova entrada.
+- Aplicar a label depende de acesso de escrita à API do GitHub (`gh` autenticado ou token equivalente); sem isso, a label deve ao menos ser sinalizada explicitamente para aplicação manual.
+
+### Quando um commit dispensa branch nova
+Mudanças triviais e isoladas — sem risco, sem lógica nova, que não alteram comportamento de build/runtime (ex.: um ajuste pontual de documentação, uma correção de digitação, um comentário em arquivo de config) — podem ser commitadas **direto na `main`** como `chore`, sem precisar de branch/PR dedicada. Branches novas ficam reservadas para trabalho de fato substancial: features, fixes com lógica, mudanças de infraestrutura/CI ou qualquer coisa que passe pelo gate de cobertura/CI.
