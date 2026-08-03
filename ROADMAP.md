@@ -16,11 +16,12 @@ Acompanhamento das entregas e fases de implementação da Prova de Conceito (PoC
 - [x] Implementação manual das queries SQL nativas (INSERT com `RETURNING...INTO` + SELECT, bind variables) e mapeamento Row → Entity no `OracleTransactionRepository` (`save`/`findById`, gerenciamento de conexão via `try/finally`).
 - [x] Implementação manual da orquestração real em `ProcessTransactionUseCase.execute()` (cálculo de risco via `IRiskStrategy` + persistência via `ITransactionRepository`).
 
-## Fase 3: Camada de Apresentação (Presentation)
-- [ ] Criação de Controllers HTTP (`TransactionController`) e validação de payload.
-- [ ] Configuração de Injeção de Dependências (IoC) para repositórios, strategies e casos de uso.
-- [ ] Mapeamento de rotas Fastify (`POST /transactions`).
-- [ ] Implementação de Middleware global para tratamento de exceções.
+## Fase 3: Camada de Apresentação (Presentation) [Concluído]
+
+- [x] Criação de Controllers HTTP (`TransactionController`) e validação de payload (JSON Schema do Fastify, com `additionalProperties: false` reforçado via `removeAdditional: false` no AJV).
+- [x] Configuração de Injeção de Dependências (IoC) para repositórios, strategies e casos de uso (composition root manual em `presentation/container.ts`).
+- [x] Mapeamento de rotas Fastify (`POST /transactions`).
+- [x] Implementação de Middleware global para tratamento de exceções (`setErrorHandler`, distingue erro de validação de erro interno).
 
 ## Fase 4: Processamento Assíncrono e Mensageria
 - [ ] Implementação do Publisher RabbitMQ para roteamento de eventos.
