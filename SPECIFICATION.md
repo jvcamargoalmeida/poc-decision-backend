@@ -42,7 +42,7 @@ Abaixo está o ciclo de vida completo de uma transação, mapeando o comportamen
 
 ### Fase B: Distribuição e Auditoria (Assíncrono)
 1. **Log de Auditoria:** O Caso de Uso empacota os dados e grava no MongoDB.
-   - *Arquivo:* `src/infrastructure/database/mongodb/MongoAuditRepository.ts`
+   - *Arquivo:* `src/infrastructure/database/mongo/MongoAuditRepository.ts`
 2. **Despacho para Fila:** O Caso de Uso publica a mensagem na fila do RabbitMQ.
    - *Arquivo:* `src/infrastructure/messaging/rabbitmq/RabbitMQPublisher.ts`
 
