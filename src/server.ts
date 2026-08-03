@@ -2,19 +2,30 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import { logger } from '@/infrastructure/logger/winston.logger';
 import { registerRoutes } from '@/presentation/routes';
+import { errorHandler } from '@/presentation/middlewares/error-handler';
+import { initOraclePool } from '@/infrastructure/database/oracle/oracle.connection';
 
 const app = Fastify({
   logger: false,
+  ajv: {
+    customOptions: {
+      removeAdditional: false,
+    },
+  },
 });
+
+app.setErrorHandler(errorHandler);
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
 async function bootstrap(): Promise<void> {
-  await registerRoutes(app);
+  const oraclePool = await initOraclePool();
 
-  // TODO: inicializar pool Oracle (initOraclePool), conexao Mongo (connectMongo)
-  // e conexao RabbitMQ (connectRabbitMQ) aqui, e injetar nos Use Cases.
+  await registerRoutes(app, oraclePool);
+
+  // TODO: inicializar conexao Mongo (connectMongo) e conexao RabbitMQ
+  // (connectRabbitMQ) aqui, e injetar nos Use Cases (Fase 4/5).
 
   try {
     await app.listen({ port: PORT, host: HOST });
