@@ -1,0 +1,892 @@
+{
+  "info": {
+    "_postman_id": "9a86ca42-bda5-4169-ab98-c8b5b5227dd6",
+    "name": "POC Decision Backend",
+    "description": "Motor de processamento financeiro orientado a eventos (Fastify + TypeScript, Clean Architecture).\n\n## Fluxo\n\n1. `POST /transactions` calcula o risco (Strategy), grava no Oracle e responde `201`.\n2. O evento vai para o RabbitMQ e o payload bruto para o MongoDB (auditoria).\n3. Um worker consome a fila e chama o webhook do **n8n**, que decide aprovar/reprovar.\n4. O n8n devolve a decisao em `PATCH /callback/transactions`, que atualiza o status no Oracle.\n\n## Autenticacao\n\n| Rota | Auth |\n| --- | --- |\n| `GET /health` | publica |\n| `POST /transactions` | **publica** (gap conhecido, ver ROADMAP.md) |\n| `PATCH /callback/transactions` | `Authorization: Bearer <CALLBACK_AUTH_TOKEN>` |\n\nO token vem de `CALLBACK_AUTH_TOKEN` no `.env` e e comparado em tempo constante (`crypto.timingSafeEqual` sobre o hash SHA-256), sem dependencia externa.\n\n## Variaveis\n\n- `url` — API (padrao `http://localhost:3000`)\n- `n8n` — n8n (padrao `http://localhost:5678`)\n- `bearerToken` — **preencher** com o `CALLBACK_AUTH_TOKEN` do seu `.env`\n- `transactionId` — preenchida automaticamente por *Create Transaction*, consumida pelo *Callback*\n\n## Ordem sugerida\n\n`Health` -> `Create Transaction` -> `Callback` (usa o id da anterior).\n\nDocs completas: `README.md`, `SPECIFICATION.md`, `ARCHITECTURE.md`, `LOAD-TEST.md`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "57069536"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{url}}/health",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "health"
+          ]
+        },
+        "description": "Liveness check. Rota publica — usada tambem pelo smoke test do CI."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200', () => pm.response.to.have.status(200));",
+              "pm.test('retorna status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+            ]
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "Success",
+          "originalRequest": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{url}}/health",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "content-length",
+              "value": "67"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"status\": \"ok\",\n    \"timestamp\": \"2026-08-04T18:56:07.747Z\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "Create Transaction",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"amount\": 5000,\n    \"currency\": \"BRL\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/transactions",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "transactions"
+          ]
+        },
+        "description": "Ingestao sincrona. **Nao exige autenticacao** (gap documentado no ROADMAP.md).\n\n### Corpo\n\n| Campo | Regra |\n| --- | --- |\n| `amount` | number, `> 0`, obrigatorio |\n| `currency` | string de exatamente 3 caracteres, obrigatorio |\n\nCampos desconhecidos sao **rejeitados** com `400` (`additionalProperties: false` reforcado por `removeAdditional: false` no AJV).\n\n### Faixas de risco (AmountRiskStrategy)\n\n| amount | riskScore |\n| --- | --- |\n| ate 5000 | `LOW` |\n| acima de 5000 ate 10000 | `MEDIUM` |\n| acima de 10000 | `HIGH` |\n\nO `id` e gerado pelo Oracle (`SYS_GUID()`) e devolvido via `RETURNING id INTO`. Este request salva esse id na variavel `transactionId` para o *Callback* reutilizar."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 201', () => pm.response.to.have.status(201));",
+              "const tx = pm.response.json();",
+              "pm.test('devolve id gerado pelo Oracle', () => pm.expect(tx.id).to.be.a('string').and.not.empty);",
+              "pm.test('nasce como PENDING', () => pm.expect(tx.status).to.eql('PENDING'));",
+              "pm.test('classifica o risco', () => pm.expect(['LOW','MEDIUM','HIGH']).to.include(tx.riskScore));",
+              "pm.collectionVariables.set('transactionId', tx.id);",
+              "console.log('transactionId salvo:', tx.id);"
+            ]
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "201 — risco LOW",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url}}/transactions",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "transactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\": 300, \"currency\": \"BRL\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "status": "Created",
+          "code": 201,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "content-length",
+              "value": "184"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"amount\": 300,\n    \"currency\": \"BRL\",\n    \"status\": \"PENDING\",\n    \"riskScore\": \"LOW\",\n    \"createdAt\": \"2026-08-04T18:56:07.757Z\",\n    \"id\": \"583E351F9BFF0CBFE063030012ACB40F\"\n}"
+        },
+        {
+          "name": "201 — risco MEDIUM",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url}}/transactions",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "transactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\": 7000, \"currency\": \"BRL\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "status": "Created",
+          "code": 201,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "content-length",
+              "value": "188"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"amount\": 7000,\n    \"currency\": \"BRL\",\n    \"status\": \"PENDING\",\n    \"riskScore\": \"MEDIUM\",\n    \"createdAt\": \"2026-08-04T18:56:07.849Z\",\n    \"id\": \"583E351F9C000CBFE063030012ACB40F\"\n}"
+        },
+        {
+          "name": "201 — risco HIGH",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url}}/transactions",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "transactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\": 25000, \"currency\": \"USD\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "status": "Created",
+          "code": 201,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "content-length",
+              "value": "187"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"amount\": 25000,\n    \"currency\": \"USD\",\n    \"status\": \"PENDING\",\n    \"riskScore\": \"HIGH\",\n    \"createdAt\": \"2026-08-04T18:56:07.873Z\",\n    \"id\": \"583E351F9C010CBFE063030012ACB40F\"\n}"
+        },
+        {
+          "name": "400 — campo obrigatorio ausente",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url}}/transactions",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "transactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\": 5000}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "status": "Bad Request",
+          "code": 400,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "content-length",
+              "value": "96"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"error\": \"ValidationError\",\n    \"message\": \"body must have required property 'currency'\"\n}"
+        },
+        {
+          "name": "400 — campo desconhecido",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url}}/transactions",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "transactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\": 5000, \"currency\": \"BRL\", \"foo\": 1}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "status": "Bad Request",
+          "code": 400,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "content-length",
+              "value": "93"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"error\": \"ValidationError\",\n    \"message\": \"body must NOT have additional properties\"\n}"
+        },
+        {
+          "name": "400 — amount menor ou igual a zero",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url}}/transactions",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "transactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount\": 0, \"currency\": \"BRL\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "status": "Bad Request",
+          "code": 400,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "content-length",
+              "value": "76"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"error\": \"ValidationError\",\n    \"message\": \"body/amount must be > 0\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "Callback (decisao do n8n)",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{bearerToken}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"id\": \"{{transactionId}}\",\n    \"status\": \"COMPLETED\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/callback/transactions",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "callback",
+            "transactions"
+          ]
+        },
+        "description": "Recebe a decisao final e atualiza o status no Oracle. Em producao quem chama e o **n8n**.\n\n**Exige `Authorization: Bearer <CALLBACK_AUTH_TOKEN>`** — sem credencial valida responde `401`. E a unica rota autenticada: ela altera o estado final de uma transacao.\n\n### Corpo\n\n| Campo | Regra |\n| --- | --- |\n| `id` | string nao vazia, obrigatorio |\n| `status` | obrigatorio, restrito a `PENDING`, `COMPLETED` ou `FAILED` |\n\nO `id` usa `{{transactionId}}`, preenchido automaticamente pelo *Create Transaction*.\n\n### Respostas\n\n`200` sucesso · `400` payload invalido · `401` sem credencial ou invalida · `404` transacao inexistente."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 200', () => pm.response.to.have.status(200));",
+              "pm.test('confirma processamento', () =>",
+              "  pm.expect(pm.response.json().message).to.eql('Callback processed successfully'));"
+            ]
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "200 — sucesso",
+          "originalRequest": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{url}}/callback/transactions",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "callback",
+                "transactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\": \"583E351F9BFF0CBFE063030012ACB40F\", \"status\": \"COMPLETED\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "content-length",
+              "value": "52"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"message\": \"Callback processed successfully\"\n}"
+        },
+        {
+          "name": "400 — status fora do enum",
+          "originalRequest": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{url}}/callback/transactions",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "callback",
+                "transactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\": \"583E351F9BFF0CBFE063030012ACB40F\", \"status\": \"APROVADO\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "status": "Bad Request",
+          "code": 400,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "content-length",
+              "value": "107"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"error\": \"ValidationError\",\n    \"message\": \"body/status must be equal to one of the allowed values\"\n}"
+        },
+        {
+          "name": "401 — sem credencial",
+          "originalRequest": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{url}}/callback/transactions",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "callback",
+                "transactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\": \"583E351F9BFF0CBFE063030012ACB40F\", \"status\": \"COMPLETED\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "status": "Unauthorized",
+          "code": 401,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "content-length",
+              "value": "97"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"error\": \"UnauthorizedError\",\n    \"message\": \"Credencial ausente ou em formato inválido\"\n}"
+        },
+        {
+          "name": "401 — credencial invalida",
+          "originalRequest": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{url}}/callback/transactions",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "callback",
+                "transactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\": \"583E351F9BFF0CBFE063030012ACB40F\", \"status\": \"COMPLETED\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "status": "Unauthorized",
+          "code": 401,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "content-length",
+              "value": "75"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"error\": \"UnauthorizedError\",\n    \"message\": \"Credencial inválida\"\n}"
+        },
+        {
+          "name": "404 — transacao inexistente",
+          "originalRequest": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{bearerToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{url}}/callback/transactions",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "callback",
+                "transactions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"id\": \"NAOEXISTE123\", \"status\": \"COMPLETED\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "status": "Not Found",
+          "code": 404,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "content-length",
+              "value": "68"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"message\": \"Transação com ID NAOEXISTE123 não encontrada\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "n8n — disparar decisao manualmente",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"data\": {\n        \"id\": \"{{transactionId}}\",\n        \"amount\": 25000,\n        \"currency\": \"BRL\",\n        \"status\": \"PENDING\",\n        \"riskScore\": \"HIGH\",\n        \"createdAt\": \"2026-01-01T00:00:00.000Z\"\n    }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{n8n}}/webhook/decision",
+          "host": [
+            "{{n8n}}"
+          ],
+          "path": [
+            "webhook",
+            "decision"
+          ]
+        },
+        "description": "Simula o que o `TransactionWorker` envia ao n8n, sem precisar passar pela fila. Util para depurar o fluxo visual isoladamente.\n\n**O envelope importa.** O `RabbitMQPublisher` empacota todo evento como `{ eventName, timestamp, data }`, entao os nodes do n8n leem `$json.body.data.*` — e nao `$json.body.*`. Por isso o payload aqui vem dentro de `data`.\n\nO node `Webhook` **nao** exige autenticacao (decisao consciente, registrada como gap no ROADMAP.md: quem alcanca o n8n na rede consegue forjar decisoes usando a credencial valida que ele possui).\n\nA resposta e a do proprio callback, porque o Webhook esta configurado com `responseMode: lastNode` — ou seja, o n8n so responde depois de concluir o fluxo inteiro.\n\nRegra do fluxo: `riskScore == HIGH` -> `FAILED`; caso contrario -> `COMPLETED`.\n\nRequer o workflow **ativo** em `http://localhost:5678`."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('n8n aceitou e concluiu o fluxo', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "200 — fluxo concluido (resposta do callback)",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{n8n}}/webhook/decision",
+              "host": [
+                "{{n8n}}"
+              ],
+              "path": [
+                "webhook",
+                "decision"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"data\": {\"id\": \"583E351F9C010CBFE063030012ACB40F\", \"amount\": 25000, \"currency\": \"USD\", \"status\": \"PENDING\", \"riskScore\": \"HIGH\", \"createdAt\": \"2026-08-04T18:56:07.873Z\"}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": "json",
+          "header": [
+            {
+              "key": "content-type",
+              "value": "application/json; charset=utf-8"
+            },
+            {
+              "key": "content-length",
+              "value": "68"
+            }
+          ],
+          "cookie": [],
+          "body": "[\n    {\n        \"message\": \"Callback processed successfully\"\n    }\n]"
+        }
+      ]
+    },
+    {
+      "name": "Load Test — Create Transaction (aleatorio)",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"amount\": {{loadAmount}},\n    \"currency\": \"{{loadCurrency}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/transactions",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "transactions"
+          ]
+        },
+        "description": "Request pensado para o **Collection Runner**: cada iteracao gera um `amount` e uma `currency` aleatorios, cobrindo as tres faixas de risco (`LOW`/`MEDIUM`/`HIGH`) em vez de martelar sempre o mesmo caminho.\n\n### Como rodar\n\nCollection Runner -> selecione **apenas** este request -> `Iterations` alto (ex.: 2000) -> `Delay` 0.\n\n### Aviso honesto sobre carga\n\nO Collection Runner executa **sequencialmente**: ele mede latencia e valida comportamento em volume, mas **nao** produz concorrencia real. Para carga de verdade use o Autocannon, que e a ferramenta oficial do projeto:\n\n```bash\nnpm run test:load   # 100 conexoes concorrentes, 30s\n```\n\nResultados medidos e os gargalos que eles revelaram estao em `LOAD-TEST.md`.\n\n### Cuidado\n\nCada iteracao grava uma linha no Oracle, um documento no MongoDB e publica uma mensagem no RabbitMQ. Uma execucao generosa suja o banco com milhares de registros — use um ambiente descartavel."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Sorteia uma faixa de risco e um valor dentro dela, para o teste exercitar",
+              "// LOW, MEDIUM e HIGH em vez de repetir sempre o mesmo caminho.",
+              "const faixas = [",
+              "  { min: 1,     max: 5000  },  // LOW",
+              "  { min: 5001,  max: 10000 },  // MEDIUM",
+              "  { min: 10001, max: 90000 },  // HIGH",
+              "];",
+              "const faixa = faixas[Math.floor(Math.random() * faixas.length)];",
+              "const amount = Math.floor(Math.random() * (faixa.max - faixa.min + 1)) + faixa.min;",
+              "const moedas = ['BRL', 'USD', 'EUR'];",
+              "",
+              "pm.variables.set('loadAmount', amount);",
+              "pm.variables.set('loadCurrency', moedas[Math.floor(Math.random() * moedas.length)]);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 201', () => pm.response.to.have.status(201));",
+              "pm.test('responde em menos de 2s', () => pm.expect(pm.response.responseTime).to.be.below(2000));",
+              "const tx = pm.response.json();",
+              "pm.test('persistiu com id', () => pm.expect(tx.id).to.be.a('string').and.not.empty);",
+              "pm.test('risco coerente com o valor', () => {",
+              "  const esperado = tx.amount > 10000 ? 'HIGH' : (tx.amount > 5000 ? 'MEDIUM' : 'LOW');",
+              "  pm.expect(tx.riskScore).to.eql(esperado);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "n8n",
+      "value": "http://localhost:5678",
+      "type": "string"
+    },
+    {
+      "key": "bearerToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "transactionId",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}
