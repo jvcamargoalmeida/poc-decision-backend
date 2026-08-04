@@ -14,7 +14,7 @@
     "test:load": "npx --yes autocannon -c 100 -d 30 -m POST -H \"Content-Type: application/json\" -b '{\"amount\": 15000, \"currency\": \"BRL\"}' http://localhost:3000/transactions"
   },
   "keywords": [],
-  "author": "",
+  "author": "João Vitor Camargo",
   "license": "ISC",
   "type": "commonjs",
   "engines": {
