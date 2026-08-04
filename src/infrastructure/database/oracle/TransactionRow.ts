@@ -13,6 +13,7 @@ interface TransactionRowLists {
   CURRENCY: string;
   STATUS: TransactionStatus;
   RISK_SCORE: RiskLevel;
+  IDEMPOTENCY_KEY: string | null;
   CREATED_AT: Date;
 }
 

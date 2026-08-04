@@ -6,6 +6,8 @@ interface CreateTransactionBody {
   currency: string;
 }
 
+export type { CreateTransactionBody };
+
 class TransactionController {
   constructor(private readonly processTransactionUseCase: ProcessTransactionUseCase) { }
 
@@ -14,7 +16,10 @@ class TransactionController {
     reply: FastifyReply,
   ): Promise<void> => {
     const { amount, currency } = request.body;
-    const transaction = await this.processTransactionUseCase.execute(amount, currency);
+    // Cabecalho padrao de mercado (mesma convencao do Stripe). Precisa vir do cliente:
+    // se o servidor gerasse a chave, um retry geraria outra e duplicaria a transacao.
+    const idempotencyKey = request.headers['idempotency-key'] as string | undefined;
+    const transaction = await this.processTransactionUseCase.execute(amount, currency, idempotencyKey);
     await reply.status(201).send(transaction);
   };
 }

@@ -9,6 +9,7 @@ import { connectRabbitMQ, closeRabbitMQ } from '@/infrastructure/messaging/rabbi
 import { TransactionWorker } from '@/infrastructure/messaging/rabbitmq/workers/TransactionWorker';
 import { N8nWebhookClient } from './infrastructure/external/n8n/N8nWebhookClient';
 import { createBearerAuthHook } from '@/presentation/middlewares/bearer-auth';
+import { createRateLimitHook } from '@/presentation/middlewares/rate-limit';
 import { registerGracefulShutdown } from '@/infrastructure/lifecycle/graceful-shutdown';
 
 const app = Fastify({
@@ -39,10 +40,22 @@ async function bootstrap(): Promise<void> {
       throw new Error('N8N_WEBHOOK_URL is not defined');
     }
 
+    const deadLetterExchange = `${transactionsQueue}.dlx`;
+    const deadLetterQueue = `${transactionsQueue}.dead`;
+
+    await rabbitChannel.assertExchange(deadLetterExchange, 'fanout', { durable: true });
+    await rabbitChannel.assertQueue(deadLetterQueue, { durable: true });
+    await rabbitChannel.bindQueue(deadLetterQueue, deadLetterExchange, '');
+
     await rabbitChannel.assertExchange('amq.topic', 'topic', { durable: true });
-    await rabbitChannel.assertQueue(transactionsQueue);
+    await rabbitChannel.assertQueue(transactionsQueue, { durable: true, deadLetterExchange });
     await rabbitChannel.bindQueue(transactionsQueue, 'amq.topic', 'transaction.created');
-    const decisionGateway = new N8nWebhookClient(n8nWebhookUrl);
+    const n8nWebhookToken = process.env.N8N_WEBHOOK_TOKEN;
+    if (!n8nWebhookToken) {
+      throw new Error('N8N_WEBHOOK_TOKEN is not defined');
+    }
+
+    const decisionGateway = new N8nWebhookClient(n8nWebhookUrl, n8nWebhookToken);
     transactionWorker = new TransactionWorker(rabbitChannel, transactionsQueue, decisionGateway);
     await transactionWorker.start();
   }
@@ -52,12 +65,24 @@ async function bootstrap(): Promise<void> {
     throw new Error('CALLBACK_AUTH_TOKEN is not defined');
   }
 
+  const apiAuthToken = process.env.API_AUTH_TOKEN;
+  if (!apiAuthToken) {
+    throw new Error('API_AUTH_TOKEN is not defined');
+  }
+
+  const rateLimitHook = createRateLimitHook({
+    max: Number(process.env.RATE_LIMIT_MAX) || 300,
+    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
+  });
+
   await registerRoutes(
     app,
     oraclePool,
     rabbitChannel,
     mongoClient.connection,
     createBearerAuthHook(callbackAuthToken),
+    createBearerAuthHook(apiAuthToken),
+    rateLimitHook,
   );
 
   try {

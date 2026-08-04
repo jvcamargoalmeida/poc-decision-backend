@@ -6,12 +6,18 @@ import { IEventPublisher } from '@/domain/events/IEventPublisher';
 import { IAuditRepository } from '@/domain/repositories/IAuditRepository';
 import { TransactionStatus } from '@/domain/enums/TransactionStatus';
 import { RiskLevel } from '@/domain/enums/RiskLevel';
+import { DuplicateIdempotencyKeyError } from '@/domain/errors/DuplicateIdempotencyKeyError';
 import type { Transaction } from '@/domain/entities/Transaction';
+
+vi.mock('@/infrastructure/logger/winston.logger', () => ({
+  logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+}));
 
 function createDeps() {
   const transactionRepository: ITransactionRepository = {
     save: vi.fn(),
     findById: vi.fn(),
+    findByIdempotencyKey: vi.fn(),
     updateStatus: vi.fn(),
   };
   const riskStrategy: IRiskStrategy = {
@@ -91,7 +97,7 @@ describe('ProcessTransactionUseCase', () => {
     expect(auditRepository.logTransaction).not.toHaveBeenCalled();
   });
 
-  it('propaga o erro quando a publicação do evento falha', async () => {
+  it('não derruba a resposta quando a publicação do evento falha — a transação já está persistida', async () => {
     const { transactionRepository, riskStrategy, mqPublisher, auditRepository } = createDeps();
     vi.mocked(riskStrategy.calculateRisk).mockReturnValue(RiskLevel.LOW);
     const savedTransaction: Transaction = {
@@ -103,16 +109,17 @@ describe('ProcessTransactionUseCase', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     };
     vi.mocked(transactionRepository.save).mockResolvedValue(savedTransaction);
-    const publishError = new Error('falha ao publicar evento');
-    vi.mocked(mqPublisher.publish).mockRejectedValue(publishError);
+    vi.mocked(mqPublisher.publish).mockRejectedValue(new Error('RabbitMQ fora do ar'));
+    vi.mocked(auditRepository.logTransaction).mockResolvedValue(undefined);
 
     const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
 
-    await expect(useCase.execute(100, 'BRL')).rejects.toThrow(publishError);
-    expect(auditRepository.logTransaction).not.toHaveBeenCalled();
+    await expect(useCase.execute(100, 'BRL')).resolves.toEqual(savedTransaction);
+    // Falha no evento nao impede a auditoria: as duas rodam em paralelo, isoladas.
+    expect(auditRepository.logTransaction).toHaveBeenCalled();
   });
 
-  it('propaga o erro quando a gravação do audit log falha', async () => {
+  it('não derruba a resposta quando a gravação do audit log falha', async () => {
     const { transactionRepository, riskStrategy, mqPublisher, auditRepository } = createDeps();
     vi.mocked(riskStrategy.calculateRisk).mockReturnValue(RiskLevel.LOW);
     const savedTransaction: Transaction = {
@@ -125,11 +132,109 @@ describe('ProcessTransactionUseCase', () => {
     };
     vi.mocked(transactionRepository.save).mockResolvedValue(savedTransaction);
     vi.mocked(mqPublisher.publish).mockResolvedValue(undefined);
-    const auditError = new Error('falha ao gravar audit log');
-    vi.mocked(auditRepository.logTransaction).mockRejectedValue(auditError);
+    vi.mocked(auditRepository.logTransaction).mockRejectedValue(new Error('Mongo fora do ar'));
 
     const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
 
-    await expect(useCase.execute(100, 'BRL')).rejects.toThrow(auditError);
+    await expect(useCase.execute(100, 'BRL')).resolves.toEqual(savedTransaction);
+    expect(mqPublisher.publish).toHaveBeenCalled();
+  });
+
+  it('ainda responde com sucesso quando evento E auditoria falham juntos', async () => {
+    const { transactionRepository, riskStrategy, mqPublisher, auditRepository } = createDeps();
+    vi.mocked(riskStrategy.calculateRisk).mockReturnValue(RiskLevel.LOW);
+    const savedTransaction: Transaction = {
+      id: 'generated-id',
+      amount: 100,
+      currency: 'BRL',
+      status: TransactionStatus.PENDING,
+      riskScore: RiskLevel.LOW,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+    vi.mocked(transactionRepository.save).mockResolvedValue(savedTransaction);
+    vi.mocked(mqPublisher.publish).mockRejectedValue(new Error('RabbitMQ fora do ar'));
+    vi.mocked(auditRepository.logTransaction).mockRejectedValue(new Error('Mongo fora do ar'));
+
+    const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
+
+    // O Oracle confirmou a escrita: devolver 500 aqui reportaria como falha algo que
+    // de fato aconteceu. O preco assumido e a transacao ficar PENDING sem decisao.
+    await expect(useCase.execute(100, 'BRL')).resolves.toEqual(savedTransaction);
+  });
+
+  describe('idempotência', () => {
+    const existente: Transaction = {
+      id: 'tx-original',
+      amount: 100,
+      currency: 'BRL',
+      status: TransactionStatus.PENDING,
+      riskScore: RiskLevel.LOW,
+      idempotencyKey: 'chave-123',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+
+    it('devolve a transação original sem gravar de novo quando a chave já foi usada', async () => {
+      const { transactionRepository, riskStrategy, mqPublisher, auditRepository } = createDeps();
+      vi.mocked(transactionRepository.findByIdempotencyKey).mockResolvedValue(existente);
+
+      const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
+      const resultado = await useCase.execute(100, 'BRL', 'chave-123');
+
+      expect(resultado).toEqual(existente);
+      expect(transactionRepository.save).not.toHaveBeenCalled();
+      // Nao republica evento nem reaudita: o pedido ja foi processado uma vez.
+      expect(mqPublisher.publish).not.toHaveBeenCalled();
+      expect(auditRepository.logTransaction).not.toHaveBeenCalled();
+    });
+
+    it('grava normalmente quando a chave ainda não foi usada', async () => {
+      const { transactionRepository, riskStrategy, mqPublisher, auditRepository } = createDeps();
+      vi.mocked(riskStrategy.calculateRisk).mockReturnValue(RiskLevel.LOW);
+      vi.mocked(transactionRepository.findByIdempotencyKey).mockResolvedValue(null);
+      vi.mocked(transactionRepository.save).mockResolvedValue(existente);
+
+      const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
+      await useCase.execute(100, 'BRL', 'chave-123');
+
+      expect(transactionRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ idempotencyKey: 'chave-123' }),
+      );
+    });
+
+    it('não consulta a chave quando o cliente não envia nenhuma', async () => {
+      const { transactionRepository, riskStrategy, mqPublisher, auditRepository } = createDeps();
+      vi.mocked(riskStrategy.calculateRisk).mockReturnValue(RiskLevel.LOW);
+      vi.mocked(transactionRepository.save).mockResolvedValue(existente);
+
+      const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
+      await useCase.execute(100, 'BRL');
+
+      expect(transactionRepository.findByIdempotencyKey).not.toHaveBeenCalled();
+    });
+
+    it('resolve a corrida devolvendo a transação vencedora quando o banco rejeita a duplicata', async () => {
+      const { transactionRepository, riskStrategy, mqPublisher, auditRepository } = createDeps();
+      vi.mocked(riskStrategy.calculateRisk).mockReturnValue(RiskLevel.LOW);
+      // Passou pela verificacao previa (ninguem tinha gravado ainda)...
+      vi.mocked(transactionRepository.findByIdempotencyKey).mockResolvedValueOnce(null);
+      // ...mas o concorrente inseriu primeiro e o indice unico barrou este.
+      vi.mocked(transactionRepository.save).mockRejectedValue(new DuplicateIdempotencyKeyError('chave-123'));
+      vi.mocked(transactionRepository.findByIdempotencyKey).mockResolvedValueOnce(existente);
+
+      const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
+
+      await expect(useCase.execute(100, 'BRL', 'chave-123')).resolves.toEqual(existente);
+    });
+
+    it('propaga o erro se a duplicata for detectada mas a transação vencedora sumir', async () => {
+      const { transactionRepository, riskStrategy, mqPublisher, auditRepository } = createDeps();
+      vi.mocked(riskStrategy.calculateRisk).mockReturnValue(RiskLevel.LOW);
+      vi.mocked(transactionRepository.findByIdempotencyKey).mockResolvedValue(null);
+      vi.mocked(transactionRepository.save).mockRejectedValue(new DuplicateIdempotencyKeyError('chave-123'));
+
+      const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
+
+      await expect(useCase.execute(100, 'BRL', 'chave-123')).rejects.toThrow(DuplicateIdempotencyKeyError);
+    });
   });
 });

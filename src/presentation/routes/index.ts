@@ -7,6 +7,7 @@ import { buildTransactionController, buildCallbackController } from '@/presentat
 import { type Channel } from 'amqplib';
 import { Connection } from 'mongoose';
 import type { BearerAuthHook } from '@/presentation/middlewares/bearer-auth';
+import type { RateLimitHook } from '@/presentation/middlewares/rate-limit';
 
 
 export async function registerRoutes(
@@ -15,12 +16,14 @@ export async function registerRoutes(
   channel: Channel,
   mongoClient: Connection,
   callbackAuthHook: BearerAuthHook,
+  apiAuthHook: BearerAuthHook,
+  rateLimitHook: RateLimitHook,
 ): Promise<void> {
   await app.register(healthPlugin);
 
   const transactionController = buildTransactionController(oraclePool, channel, mongoClient);
-  await registerTransactionRoutes(app, transactionController);
+  await registerTransactionRoutes(app, transactionController, apiAuthHook, rateLimitHook);
 
   const callbackController = buildCallbackController(oraclePool);
-  await registerCallbackRoutes(app, callbackController, callbackAuthHook);
+  await registerCallbackRoutes(app, callbackController, callbackAuthHook, rateLimitHook);
 }

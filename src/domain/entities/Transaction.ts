@@ -7,6 +7,8 @@ interface Transaction {
     currency: string;
     status: TransactionStatus;
     riskScore: RiskLevel;
+    /** Chave enviada pelo cliente para tornar o retry seguro. Opcional. */
+    idempotencyKey?: string;
     createdAt: Date;
 }
 

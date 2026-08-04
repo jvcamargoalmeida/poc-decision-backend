@@ -31,12 +31,12 @@ describe('TransactionController', () => {
     } as unknown as ProcessTransactionUseCase;
 
     const controller = new TransactionController(processTransactionUseCase);
-    const request = { body: { amount: 100, currency: 'BRL' } } as CreateTransactionRequest;
+    const request = { body: { amount: 100, currency: 'BRL' }, headers: {} } as unknown as CreateTransactionRequest;
     const reply = createFakeReply();
 
     await controller.create(request, reply);
 
-    expect(processTransactionUseCase.execute).toHaveBeenCalledWith(100, 'BRL');
+    expect(processTransactionUseCase.execute).toHaveBeenCalledWith(100, 'BRL', undefined);
     expect(reply.status).toHaveBeenCalledWith(201);
     expect(reply.send).toHaveBeenCalledWith(savedTransaction);
   });
@@ -48,9 +48,38 @@ describe('TransactionController', () => {
     } as unknown as ProcessTransactionUseCase;
 
     const controller = new TransactionController(processTransactionUseCase);
-    const request = { body: { amount: 100, currency: 'BRL' } } as CreateTransactionRequest;
+    const request = { body: { amount: 100, currency: 'BRL' }, headers: {} } as unknown as CreateTransactionRequest;
     const reply = createFakeReply();
 
     await expect(controller.create(request, reply)).rejects.toThrow(useCaseError);
+  });
+
+  it('repassa o header Idempotency-Key ao use case', async () => {
+    const processTransactionUseCase = {
+      execute: vi.fn().mockResolvedValue({} as Transaction),
+    } as unknown as ProcessTransactionUseCase;
+
+    const controller = new TransactionController(processTransactionUseCase);
+    const request = {
+      body: { amount: 100, currency: 'BRL' },
+      headers: { 'idempotency-key': 'chave-abc' },
+    } as unknown as CreateTransactionRequest;
+
+    await controller.create(request, createFakeReply());
+
+    expect(processTransactionUseCase.execute).toHaveBeenCalledWith(100, 'BRL', 'chave-abc');
+  });
+
+  it('passa undefined quando o cliente não envia a chave', async () => {
+    const processTransactionUseCase = {
+      execute: vi.fn().mockResolvedValue({} as Transaction),
+    } as unknown as ProcessTransactionUseCase;
+
+    const controller = new TransactionController(processTransactionUseCase);
+    const request = { body: { amount: 100, currency: 'BRL' }, headers: {} } as unknown as CreateTransactionRequest;
+
+    await controller.create(request, createFakeReply());
+
+    expect(processTransactionUseCase.execute).toHaveBeenCalledWith(100, 'BRL', undefined);
   });
 });

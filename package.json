@@ -10,10 +10,11 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:load": "set -a && . ./.env && set +a && npx --yes autocannon -c 100 -d 30 -m POST -H \"Content-Type: application/json\" -H \"Authorization: Bearer $API_AUTH_TOKEN\" -b '{\"amount\": 15000, \"currency\": \"BRL\"}' http://localhost:3000/transactions"
   },
   "keywords": [],
-  "author": "",
+  "author": "Jo\u00e3o Vitor Camargo",
   "license": "ISC",
   "type": "commonjs",
   "engines": {

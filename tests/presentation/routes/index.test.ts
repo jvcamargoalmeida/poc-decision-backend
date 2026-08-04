@@ -5,6 +5,7 @@ import type { Connection } from 'mongoose';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerRoutes } from '@/presentation/routes';
 import { createBearerAuthHook } from '@/presentation/middlewares/bearer-auth';
+import { createRateLimitHook } from '@/presentation/middlewares/rate-limit';
 import { errorHandler } from '@/presentation/middlewares/error-handler';
 
 vi.mock('@/infrastructure/logger/winston.logger', () => ({
@@ -18,6 +19,8 @@ const fakeMongoConnection = { model: vi.fn().mockReturnValue(vi.fn()) } as unkno
 const CALLBACK_TOKEN = 'token-de-teste';
 const authHook = createBearerAuthHook(CALLBACK_TOKEN);
 const authHeaders = { authorization: `Bearer ${CALLBACK_TOKEN}` };
+// Limite alto: estes testes verificam roteamento/auth, nao rate limiting.
+const semLimitePratico = () => createRateLimitHook({ max: 10_000, windowMs: 60_000 });
 
 describe('registerRoutes', () => {
   let app: ReturnType<typeof Fastify>;
@@ -28,7 +31,7 @@ describe('registerRoutes', () => {
 
   it('registers the health endpoint on the Fastify instance', async () => {
     app = Fastify();
-    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook, authHook, semLimitePratico());
 
     const response = await app.inject({ method: 'GET', url: '/health' });
 
@@ -38,20 +41,23 @@ describe('registerRoutes', () => {
 
   it('registers the transactions endpoint on the Fastify instance', async () => {
     app = Fastify();
-    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook, authHook, semLimitePratico());
 
-    const response = await app.inject({ method: 'POST', url: '/transactions', payload: {} });
+    const response = await app.inject({
+      method: 'POST', url: '/transactions', headers: authHeaders, payload: {},
+    });
 
     expect(response.statusCode).toBe(400);
   });
 
   it('rejeita campos desconhecidos no payload quando removeAdditional está desabilitado (config de produção)', async () => {
     app = Fastify({ ajv: { customOptions: { removeAdditional: false } } });
-    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook, authHook, semLimitePratico());
 
     const response = await app.inject({
       method: 'POST',
       url: '/transactions',
+      headers: authHeaders,
       payload: { amount: 100, currency: 'BRL', extra: true },
     });
 
@@ -60,7 +66,7 @@ describe('registerRoutes', () => {
 
   it('registers the callback endpoint on the Fastify instance', async () => {
     app = Fastify();
-    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook, authHook, semLimitePratico());
 
     const response = await app.inject({
       method: 'PATCH',
@@ -74,7 +80,7 @@ describe('registerRoutes', () => {
 
   it('rejeita status fora do enum TransactionStatus no callback', async () => {
     app = Fastify();
-    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook, authHook, semLimitePratico());
 
     const response = await app.inject({
       method: 'PATCH',
@@ -89,7 +95,7 @@ describe('registerRoutes', () => {
   it('responde 401 no callback quando não há credencial', async () => {
     app = Fastify();
     app.setErrorHandler(errorHandler);
-    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook, authHook, semLimitePratico());
 
     const response = await app.inject({
       method: 'PATCH',
@@ -103,7 +109,7 @@ describe('registerRoutes', () => {
   it('responde 401 no callback quando a credencial está errada', async () => {
     app = Fastify();
     app.setErrorHandler(errorHandler);
-    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook, authHook, semLimitePratico());
 
     const response = await app.inject({
       method: 'PATCH',
@@ -115,12 +121,33 @@ describe('registerRoutes', () => {
     expect(response.statusCode).toBe(401);
   });
 
-  it('não exige credencial na rota de transações (auth aplicada só ao callback)', async () => {
+  it('exige credencial também na rota de transações', async () => {
     app = Fastify();
-    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
+    app.setErrorHandler(errorHandler);
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook, authHook, semLimitePratico());
 
-    const response = await app.inject({ method: 'POST', url: '/transactions', payload: {} });
+    const response = await app.inject({
+      method: 'POST', url: '/transactions', payload: { amount: 100, currency: 'BRL' },
+    });
 
-    expect(response.statusCode).not.toBe(401);
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('responde 429 quando o limite de requisições é excedido', async () => {
+    app = Fastify();
+    app.setErrorHandler(errorHandler);
+    const limiteBaixo = createRateLimitHook({ max: 2, windowMs: 60_000 });
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook, authHook, limiteBaixo);
+
+    const chamar = () => app.inject({
+      method: 'POST', url: '/transactions', headers: authHeaders, payload: {},
+    });
+
+    expect((await chamar()).statusCode).toBe(400);
+    expect((await chamar()).statusCode).toBe(400);
+
+    const barrada = await chamar();
+    expect(barrada.statusCode).toBe(429);
+    expect(barrada.headers['retry-after']).toBeDefined();
   });
 });

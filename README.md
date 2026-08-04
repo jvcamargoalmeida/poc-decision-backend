@@ -22,7 +22,7 @@ A arquitetura dispensa o uso de ORMs pesados em favor de drivers nativos e padr�
 1. **Ingestão síncrona:** `POST /transactions` → cálculo de risco interno (Strategy Pattern) → persistência no Oracle (SQL nativo) → resposta `201/202` imediata ao cliente, sem esperar processamento externo.
 2. **Auditoria e distribuição (assíncrono):** o payload bruto é gravado no MongoDB (data lake/compliance) e um evento "Transação Criada" é publicado no RabbitMQ.
 3. **Decisão externa:** um Worker consome a fila e dispara um Webhook para o **n8n**, que roda o fluxo visual de decisão (simulando engines de fraude/crédito).
-4. **Callback:** o n8n retorna a decisão via `POST /callback/transactions`, atualizando o status final da transação no Oracle.
+4. **Callback:** o n8n retorna a decisão via `PATCH /callback/transactions` (autenticado por *bearer token*), atualizando o status final da transação no Oracle.
 
 A especificação funcional/não funcional completa (RF/RNF) e o mapeamento arquivo-a-arquivo de cada fase estão em [`SPECIFICATION.md`](SPECIFICATION.md). O progresso real da implementação (o que já está pronto vs. planejado) está em [`ROADMAP.md`](ROADMAP.md).
 
@@ -39,8 +39,8 @@ npm install
 cp .env.example .env
 
 # sobe RabbitMQ, MongoDB, Oracle XE e n8n
-# (o n8n já importa o fluxo de decisão sozinho na 1ª subida, ver n8n-workflows/README.md —
-# só falta ativá-lo manualmente em http://localhost:5678 depois)
+# (o n8n importa, publica e credencia o fluxo de decisão sozinho na 1ª subida —
+# ver n8n-workflows/README.md; nenhum passo manual é necessário)
 docker compose up -d
 
 npm run dev
@@ -59,22 +59,26 @@ O servidor sobe em `http://localhost:3000`; `GET /health` retorna o status da ap
 | `npm test`              | Executa a suíte de testes unitários (Vitest) uma única vez |
 | `npm run test:watch`    | Executa os testes em modo watch                            |
 | `npm run test:coverage` | Executa os testes com relatório de cobertura               |
+| `npm run test:load`     | Teste de carga com Autocannon (ver [`LOAD-TEST.md`](LOAD-TEST.md)) |
 
 ## 🗂️ Estrutura do projeto
 
 ```text
 src/
-├── domain/
+├── domain/               # Regras e contratos, sem dependência de framework
 │   ├── entities/         # Transaction
 │   ├── enums/            # RiskLevel, TransactionStatus
-│   ├── repositories/     # ITransactionRepository (interface)
+│   ├── errors/           # DomainError, TransactionNotFoundError
+│   ├── events/           # IEventPublisher
+│   ├── repositories/     # ITransactionRepository, IAuditRepository
+│   ├── services/         # IDecisionGateway
 │   └── strategies/risk/  # IRiskStrategy, AmountRiskStrategy
-├── application/          # Use Cases (ProcessTransactionUseCase)
-├── infrastructure/       # Oracle (pool + repository), Mongo, RabbitMQ, Winston
-└── presentation/         # Servidor Fastify, rotas e plugins
+├── application/          # Use Cases (Process / UpdateTransactionStatus)
+├── infrastructure/       # Implementações: Oracle, Mongo, RabbitMQ, n8n, Winston, shutdown
+└── presentation/         # Fastify: rotas, controllers, middlewares e composition root
 tests/                    # Testes unitários (espelha a estrutura de src/)
 db/oracle/init/           # Scripts .sql/.sh rodados na 1ª inicialização do Oracle (ver README na pasta)
-n8n-workflows/            # Fluxos do n8n exportados (.json) para importação manual (ver README na pasta)
+n8n-workflows/            # Fluxo do n8n versionado + template de credencial, importados no boot (ver README na pasta)
 ```
 
 Os limites do que a IA pode gerar em cada camada estão documentados em [`CLAUDE.md`](CLAUDE.md).
@@ -93,7 +97,16 @@ Não há Dependabot no projeto (removido — atualizações de dependência são
 
 Veja [`.env.example`](.env.example) para a lista completa (Oracle, MongoDB, RabbitMQ, n8n e configurações do servidor).
 
-A rota de callback (`PATCH /callback/transactions`) é protegida por *bearer token* — sem credencial válida responde `401`. O segredo vem de `CALLBACK_AUTH_TOKEN` e é comparado em tempo constante (`crypto.timingSafeEqual` sobre o hash SHA-256 dos valores, para não vazar informação por timing nem pelo comprimento do token). Não há dependência externa: só o `crypto` nativo do Node.
+As duas rotas de negócio exigem *bearer token* — sem credencial válida respondem `401`. `GET /health` segue pública, por ser alvo de monitoração.
+
+| Rota | Credencial |
+| --- | --- |
+| `POST /transactions` | `API_AUTH_TOKEN` (clientes da API) |
+| `PATCH /callback/transactions` | `CALLBACK_AUTH_TOKEN` (n8n) |
+
+Os segredos são separados de propósito: cliente e n8n são atores distintos, então o vazamento de um não concede acesso ao outro. Ambos são comparados em tempo constante (`crypto.timingSafeEqual` sobre o hash SHA-256, para não vazar informação por timing nem pelo comprimento do token). Não há dependência externa: só o `crypto` nativo do Node.
+
+Ambas as rotas também têm **rate limiting por IP** (`RATE_LIMIT_MAX` por `RATE_LIMIT_WINDOW_MS`), respondendo `429` com `Retry-After`. O contador roda antes da verificação de credencial — requisição não autenticada também consome cota, senão daria para brutar credencial sem limite.
 
 O n8n envia esse header através de uma credencial *Bearer Auth*. Credenciais não são versionadas junto com o workflow (o segredo não entra no git) — em vez disso, o `docker-compose.yml` materializa a credencial no boot a partir de um template com placeholder, injetando o valor do `.env` (ver [`n8n-workflows/README.md`](n8n-workflows/README.md)).
 
@@ -105,3 +118,4 @@ O n8n envia esse header através de uma credencial *Bearer Auth*. Credenciais n�
 | [`ROADMAP.md`](ROADMAP.md) | Progresso real da implementação, fase a fase |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Diagramas de eventos, entidades e sistema (Mermaid) |
 | [`CLAUDE.md`](CLAUDE.md) | Padrões de engenharia e limites de geração automatizada de código por IA |
+| [`LOAD-TEST.md`](LOAD-TEST.md) | Resultados do teste de carga e os gargalos que ele revelou |

@@ -1,6 +1,6 @@
 [
   {
-    "updatedAt": "2026-08-04T17:42:56.782Z",
+    "updatedAt": "2026-08-04T19:45:30.804Z",
     "createdAt": "2026-08-04T15:36:32.538Z",
     "id": "HzZSnB2P7GmjA1Zj",
     "name": "Decision",
@@ -12,6 +12,7 @@
         "parameters": {
           "httpMethod": "POST",
           "path": "decision",
+          "authentication": "headerAuth",
           "responseMode": "lastNode",
           "responseData": "allEntries",
           "options": {
@@ -26,7 +27,13 @@
         ],
         "id": "8d5ef069-a24a-4059-bbd7-978b3f5f39f6",
         "name": "Webhook",
-        "webhookId": "b1ee7529-0fc8-4fb4-a6a8-32c74e2d7d2d"
+        "webhookId": "b1ee7529-0fc8-4fb4-a6a8-32c74e2d7d2d",
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "TdfPeTAlgECyHPr9",
+            "name": "Authorization"
+          }
+        }
       },
       {
         "parameters": {
@@ -152,12 +159,14 @@
       "availableInMCP": false
     },
     "staticData": null,
-    "meta": null,
+    "meta": {
+      "templateCredsSetupCompleted": true
+    },
     "nodeGroups": [],
     "pinData": {},
-    "versionId": "074f62b7-f534-411d-b3ab-c28f99621bd8",
-    "activeVersionId": "074f62b7-f534-411d-b3ab-c28f99621bd8",
-    "versionCounter": 114,
+    "versionId": "e75ed093-845d-4f29-a068-14c1503d19bf",
+    "activeVersionId": "e75ed093-845d-4f29-a068-14c1503d19bf",
+    "versionCounter": 117,
     "triggerCount": 1,
     "sourceWorkflowId": null,
     "tags": [],
@@ -182,7 +191,7 @@
       }
     ],
     "versionMetadata": {
-      "name": "Version 074f62b7",
+      "name": "Version e75ed093",
       "description": ""
     }
   }
