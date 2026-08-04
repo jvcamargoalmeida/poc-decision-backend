@@ -2,6 +2,7 @@ import oracledb, { BindParameters } from 'oracledb';
 import { ITransactionRepository } from '@/domain/repositories/ITransactionRepository';
 import { Transaction } from '@/domain/entities/Transaction';
 import { TransactionStatus } from '@/domain/enums/TransactionStatus';
+import { DuplicateIdempotencyKeyError } from '@/domain/errors/DuplicateIdempotencyKeyError';
 import { logger } from '@/infrastructure/logger/winston.logger';
 import { TransactionRowLists } from './TransactionRow';
 
@@ -11,8 +12,8 @@ class OracleTransactionRepository implements ITransactionRepository {
   async save(transaction: Transaction): Promise<Transaction> {
     try {
       const sql = `
-        INSERT INTO transactions (amount, currency, status, risk_score, created_at)
-        VALUES (:amount, :currency, :status, :riskScore, :createdAt)
+        INSERT INTO transactions (amount, currency, status, risk_score, idempotency_key, created_at)
+        VALUES (:amount, :currency, :status, :riskScore, :idempotencyKey, :createdAt)
         RETURNING id INTO :outId
       `;
 
@@ -21,6 +22,7 @@ class OracleTransactionRepository implements ITransactionRepository {
         currency: transaction.currency,
         status: transaction.status,
         riskScore: transaction.riskScore,
+        idempotencyKey: transaction.idempotencyKey ?? null,
         createdAt: transaction.createdAt,
         outId: { type: oracledb.STRING, dir: oracledb.BIND_OUT }
       };
@@ -39,6 +41,13 @@ class OracleTransactionRepository implements ITransactionRepository {
       };
 
     } catch (error) {
+      // ORA-00001 = unique constraint violated. Sob concorrencia, duas requisicoes com
+      // a mesma chave podem passar juntas pela verificacao previa; quem garante a
+      // unicidade de fato e o indice do banco. Traduzimos aqui para um erro de dominio
+      // porque a camada de aplicacao nao deve conhecer codigos de erro do driver.
+      if ((error as { errorNum?: number }).errorNum === 1 && transaction.idempotencyKey) {
+        throw new DuplicateIdempotencyKeyError(transaction.idempotencyKey);
+      }
       logger.error('Erro ao salvar transação no banco de dados Oracle:', error);
       throw error;
     }
@@ -47,7 +56,7 @@ class OracleTransactionRepository implements ITransactionRepository {
   async findById(id: string): Promise<Transaction | null> {
     try {
       const sql = `
-        SELECT id, amount, currency, status, risk_score, created_at
+        SELECT id, amount, currency, status, risk_score, idempotency_key, created_at
         FROM transactions
         WHERE id = :id
       `;
@@ -59,21 +68,47 @@ class OracleTransactionRepository implements ITransactionRepository {
         return null;
       }
 
-      const row = result.rows[0];
-
-      return {
-        id: row.ID,
-        amount: row.AMOUNT,
-        currency: row.CURRENCY,
-        status: row.STATUS,
-        riskScore: row.RISK_SCORE,
-        createdAt: new Date(row.CREATED_AT)
-      };
+      return this.toTransaction(result.rows[0]);
 
     } catch (error) {
       logger.error(`Erro ao buscar transação com ID ${id}:`, error);
       throw error;
     }
+  }
+
+  async findByIdempotencyKey(idempotencyKey: string): Promise<Transaction | null> {
+    try {
+      const sql = `
+        SELECT id, amount, currency, status, risk_score, idempotency_key, created_at
+        FROM transactions
+        WHERE idempotency_key = :idempotencyKey
+      `;
+      const params: BindParameters = { idempotencyKey };
+
+      const result = await this.executeQuery<TransactionRowLists>(sql, params);
+
+      if (!result.rows || result.rows.length === 0) {
+        return null;
+      }
+
+      return this.toTransaction(result.rows[0]);
+
+    } catch (error) {
+      logger.error(`Erro ao buscar transação pela chave de idempotência ${idempotencyKey}:`, error);
+      throw error;
+    }
+  }
+
+  private toTransaction(row: TransactionRowLists): Transaction {
+    return {
+      id: row.ID,
+      amount: row.AMOUNT,
+      currency: row.CURRENCY,
+      status: row.STATUS,
+      riskScore: row.RISK_SCORE,
+      idempotencyKey: row.IDEMPOTENCY_KEY ?? undefined,
+      createdAt: new Date(row.CREATED_AT)
+    };
   }
 
   async updateStatus(id: string, status: TransactionStatus): Promise<void> {

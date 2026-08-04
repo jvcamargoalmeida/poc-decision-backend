@@ -4,6 +4,14 @@ import type { BearerAuthHook } from '@/presentation/middlewares/bearer-auth';
 import type { RateLimitHook } from '@/presentation/middlewares/rate-limit';
 
 const createTransactionSchema = {
+  // Opcional e sem `required`: mantem compatibilidade com clientes que nao enviam a
+  // chave. Quem envia ganha retry seguro; quem nao envia mantem o comportamento antigo.
+  headers: {
+    type: 'object',
+    properties: {
+      'idempotency-key': { type: 'string', minLength: 1, maxLength: 64 },
+    },
+  },
   body: {
     type: 'object',
     required: ['amount', 'currency'],

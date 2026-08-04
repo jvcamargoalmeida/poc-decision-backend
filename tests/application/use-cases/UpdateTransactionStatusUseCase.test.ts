@@ -14,6 +14,7 @@ function createDeps() {
   const transactionRepository: ITransactionRepository = {
     save: vi.fn(),
     findById: vi.fn(),
+    findByIdempotencyKey: vi.fn(),
     updateStatus: vi.fn(),
   };
   return { transactionRepository };
