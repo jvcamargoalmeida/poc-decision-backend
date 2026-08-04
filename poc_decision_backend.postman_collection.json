@@ -699,7 +699,7 @@
       ]
     },
     {
-      "name": "n8n — disparar decisao manualmente",
+      "name": "n8n disparar decisao manualmente",
       "request": {
         "auth": {
           "type": "noauth"
@@ -793,7 +793,7 @@
       ]
     },
     {
-      "name": "Load Test — Create Transaction (aleatorio)",
+      "name": "Load Test Create Transaction (aleatorio)",
       "request": {
         "auth": {
           "type": "noauth"
