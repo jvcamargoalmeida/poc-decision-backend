@@ -1,6 +1,7 @@
 import oracledb, { BindParameters } from 'oracledb';
 import { ITransactionRepository } from '@/domain/repositories/ITransactionRepository';
 import { Transaction } from '@/domain/entities/Transaction';
+import { TransactionStatus } from '@/domain/enums/TransactionStatus';
 import { logger } from '@/infrastructure/logger/winston.logger';
 import { TransactionRowLists } from './TransactionRow';
 
@@ -71,6 +72,24 @@ class OracleTransactionRepository implements ITransactionRepository {
 
     } catch (error) {
       logger.error(`Erro ao buscar transação com ID ${id}:`, error);
+      throw error;
+    }
+  }
+
+  async updateStatus(id: string, status: TransactionStatus): Promise<void> {
+    try {
+      const sql = `
+        UPDATE transactions
+        SET status = :status
+        WHERE id = :id
+      `;
+      const params: BindParameters = {
+        status: status,
+        id: id
+      };
+      await this.executeQuery(sql, params);
+    } catch (error) {
+      logger.error(`Erro ao atualizar status da transação com ID ${id}:`, error);
       throw error;
     }
   }

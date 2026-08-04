@@ -1,5 +1,6 @@
 import type { Channel, ConsumeMessage } from 'amqplib';
 import { logger } from '@/infrastructure/logger/winston.logger';
+import { IDecisionGateway } from '@/domain/services/IDecisionGateway';
 
 class TransactionWorker {
   private consumerTag: string | null = null;
@@ -7,6 +8,7 @@ class TransactionWorker {
   constructor(
     private readonly channel: Channel,
     private readonly queue: string,
+    private readonly decisionGateway: IDecisionGateway
   ) { }
 
   async start(): Promise<void> {
@@ -23,6 +25,7 @@ class TransactionWorker {
     try {
       const content = message.content.toString();
       const transaction = JSON.parse(content);
+      await this.decisionGateway.requestDecision(transaction);
       await this.processTransaction(transaction);
       this.channel.ack(message);
       logger.info('Transaction message processed successfully', { transaction });

@@ -8,6 +8,8 @@ import { RabbitMQPublisher } from '@/infrastructure/messaging/rabbitmq/RabbitMQP
 import { type Channel } from 'amqplib';
 import { MongoAuditRepository } from '@/infrastructure/database/mongo/MongoAuditRepository';
 import { AuditLogDocument, auditLogSchema } from '@/infrastructure/database/mongo/AuditLog.model';
+import { UpdateTransactionStatusUseCase } from '@/application/use-cases/UpdateTransactionStatusUseCase';
+import { CallbackController } from '@/presentation/controllers/CallbackController';
 
 function buildTransactionController(pool: oracledb.Pool, channel: Channel, mongoClient: Connection): TransactionController {
   const transactionRepository = new OracleTransactionRepository(pool);
@@ -20,4 +22,11 @@ function buildTransactionController(pool: oracledb.Pool, channel: Channel, mongo
   return new TransactionController(processTransactionUseCase);
 }
 
-export { buildTransactionController };
+function buildCallbackController(pool: oracledb.Pool): CallbackController {
+  const transactionRepository = new OracleTransactionRepository(pool);
+  const updateTransactionStatusUseCase = new UpdateTransactionStatusUseCase(transactionRepository);
+
+  return new CallbackController(updateTransactionStatusUseCase);
+}
+
+export { buildTransactionController, buildCallbackController };
