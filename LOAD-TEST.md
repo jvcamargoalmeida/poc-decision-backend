@@ -6,10 +6,17 @@ Evidência para o **RNF01 (Alta Volumetria)**, conforme cenário definido na
 ## Como reproduzir
 
 ```bash
-docker compose up -d          # Oracle, MongoDB, RabbitMQ, n8n
-npm run build && npm start    # build compilado, não ts-node-dev
+docker compose up -d                          # Oracle, MongoDB, RabbitMQ, n8n
+npm run build
+RATE_LIMIT_MAX=1000000 npm start              # ver nota abaixo
 npm run test:load
 ```
+
+> **Nota:** os números desta página foram medidos **antes** de a ingestão ganhar autenticação e
+> rate limiting. Hoje `POST /transactions` exige `Authorization: Bearer <API_AUTH_TOKEN>` (o
+> `npm run test:load` já envia o header, lendo do `.env`) e está sujeita ao limite por IP. Como
+> o cenário dispara ~515 req/s de um único endereço, ele estoura qualquer limite realista — por
+> isso o `RATE_LIMIT_MAX` alto acima. Sem isso, o teste mede o limitador, não a aplicação.
 
 O teste roda contra o **build compilado** (`node dist/server.js`), não contra o `ts-node-dev` —
 medir o servidor de desenvolvimento mediria o overhead de transpilação em vez da aplicação.
@@ -80,22 +87,32 @@ Estado final no Oracle, depois da fila drenar por completo:
 Ou seja: **cerca de metade das transações aceitas com `201` nunca recebeu decisão**, e o cliente
 não tem como saber disso. Do ponto de vista dele, todas foram aceitas com sucesso.
 
-Isso valida empiricamente dois gaps que estavam documentados apenas como hipótese no
-[`ROADMAP.md`](ROADMAP.md):
+Isso validou empiricamente dois gaps que estavam documentados apenas como hipótese — e **ambos
+foram corrigidos depois deste teste**:
 
 - **Ausência de dead-letter queue** — deixou de ser risco teórico e virou perda medida de 7.866
-  mensagens numa única execução de 30 segundos.
-- **Ausência de rate limiting** — nada protegeu o n8n de receber mais carga do que aguenta.
+  mensagens numa única execução de 30 segundos. Hoje a fila é declarada com
+  `x-dead-letter-exchange` e a mensagem rejeitada cai em `transactions.queue.dead`, com o header
+  `x-death` preservando motivo e origem. O mesmo cenário, hoje, não perderia nada: as 7.866
+  mensagens estariam disponíveis para reprocessamento.
+- **Ausência de rate limiting** — nada protegeu o n8n de receber mais carga do que aguenta. Hoje
+  existe limite por IP com resposta `429`.
 
 ## Conclusão
 
 O RNF01 é atendido **na borda síncrona**: a ingestão sustentou ~515 req/s com 100 conexões
 concorrentes, sem recusar requisição e sem perder gravação no Oracle.
 
-O sistema como um todo, porém, **não é resiliente sob a mesma carga**: a etapa de decisão externa
-degrada silenciosamente e descarta trabalho. Antes de tratar esse número como capacidade real,
-o mínimo seria dead-letter queue com retry, e rate limiting protegendo a integração externa.
+O sistema como um todo, na época deste teste, **não era resiliente sob a mesma carga**: a etapa de
+decisão externa degradava silenciosamente e descartava trabalho. As duas correções que esse
+resultado motivou (dead-letter queue e rate limiting) já foram implementadas.
+
+O que **continua em aberto** é a saturação do próprio n8n: o limitador reduz a pressão sobre ele,
+mas não implementa retry — uma mensagem que falha vai para a fila morta e depende de
+reprocessamento manual. Um retry com backoff antes do descarte seria o próximo passo natural.
 
 Para melhorar o número da ingestão em si, o primeiro experimento óbvio é aumentar
 `ORACLE_POOL_MAX` e tirar `publish`/`logTransaction` do caminho da requisição — nessa ordem,
-medindo uma mudança de cada vez.
+medindo uma mudança de cada vez. Vale também limitar o `prefetch` do consumidor: hoje o worker
+puxa mensagens sem teto e é isso que permite ele martelar o n8n mais rápido do que o orquestrador
+aguenta.

@@ -97,7 +97,16 @@ Não há Dependabot no projeto (removido — atualizações de dependência são
 
 Veja [`.env.example`](.env.example) para a lista completa (Oracle, MongoDB, RabbitMQ, n8n e configurações do servidor).
 
-A rota de callback (`PATCH /callback/transactions`) é protegida por *bearer token* — sem credencial válida responde `401`. O segredo vem de `CALLBACK_AUTH_TOKEN` e é comparado em tempo constante (`crypto.timingSafeEqual` sobre o hash SHA-256 dos valores, para não vazar informação por timing nem pelo comprimento do token). Não há dependência externa: só o `crypto` nativo do Node.
+As duas rotas de negócio exigem *bearer token* — sem credencial válida respondem `401`. `GET /health` segue pública, por ser alvo de monitoração.
+
+| Rota | Credencial |
+| --- | --- |
+| `POST /transactions` | `API_AUTH_TOKEN` (clientes da API) |
+| `PATCH /callback/transactions` | `CALLBACK_AUTH_TOKEN` (n8n) |
+
+Os segredos são separados de propósito: cliente e n8n são atores distintos, então o vazamento de um não concede acesso ao outro. Ambos são comparados em tempo constante (`crypto.timingSafeEqual` sobre o hash SHA-256, para não vazar informação por timing nem pelo comprimento do token). Não há dependência externa: só o `crypto` nativo do Node.
+
+Ambas as rotas também têm **rate limiting por IP** (`RATE_LIMIT_MAX` por `RATE_LIMIT_WINDOW_MS`), respondendo `429` com `Retry-After`. O contador roda antes da verificação de credencial — requisição não autenticada também consome cota, senão daria para brutar credencial sem limite.
 
 O n8n envia esse header através de uma credencial *Bearer Auth*. Credenciais não são versionadas junto com o workflow (o segredo não entra no git) — em vez disso, o `docker-compose.yml` materializa a credencial no boot a partir de um template com placeholder, injetando o valor do `.env` (ver [`n8n-workflows/README.md`](n8n-workflows/README.md)).
 
