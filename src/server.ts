@@ -30,7 +30,9 @@ async function bootstrap(): Promise<void> {
   const transactionsQueue = process.env.RABBITMQ_QUEUE_TRANSACTIONS;
 
   if (transactionsQueue) {
+    await rabbitChannel.assertExchange('amq.topic', 'topic', { durable: true });
     await rabbitChannel.assertQueue(transactionsQueue);
+    await rabbitChannel.bindQueue(transactionsQueue, 'amq.topic', 'transaction.created');
     const transactionWorker = new TransactionWorker(rabbitChannel, transactionsQueue);
     await transactionWorker.start();
   }
