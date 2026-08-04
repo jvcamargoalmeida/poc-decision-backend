@@ -22,6 +22,8 @@ Este documento descreve as capacidades do sistema, suas restrições arquitetura
 - **RNF03 - Resiliência:** Serviços externos (n8n) não podem bloquear a resposta principal da API (padrão *Fire and Forget* através de filas).
 - **RNF04 - Observabilidade:** Todos os logs de aplicação devem ser gerados em formato estruturado (JSON estrito) para ingestão futura em APMs (Elastic/Datadog).
 - **RNF05 - Qualidade de Código:** O projeto deve manter uma cobertura de testes unitários mínima de 95% (Vitest), imposta via CI/CD em todo Pull Request.
+- **RNF06 - Autenticação de Callback:** A rota de callback, por alterar o estado final de uma transação, deve exigir credencial (*bearer token*) e rejeitar chamadas não autenticadas com `401`. A comparação do segredo deve ser feita em tempo constante para não vazar informação por *timing*.
+- **RNF07 - Encerramento Gracioso:** Ao receber `SIGTERM`/`SIGINT`, a aplicação deve parar de aceitar trabalho novo (HTTP e consumo da fila) e fechar as conexões de Oracle, MongoDB e RabbitMQ antes de encerrar o processo, com limite de tempo para não travar indefinidamente.
 
 ---
 
@@ -31,7 +33,7 @@ Abaixo está o ciclo de vida completo de uma transação, mapeando o comportamen
 
 ### Fase A: Recepção e Persistência Síncrona (A API Principal)
 1. **Recepção e Validação:** O cliente faz um POST em `/transactions`.
-   - *Arquivos:* `src/presentation/http/routes/transaction.routes.ts` e `src/presentation/http/controllers/TransactionController.ts`
+   - *Arquivos:* `src/presentation/routes/transaction.routes.ts` e `src/presentation/controllers/TransactionController.ts`
 2. **Orquestração Síncrona:** O Controller chama o Caso de Uso principal.
    - *Arquivo:* `src/application/use-cases/ProcessTransactionUseCase.ts`
 3. **Cálculo de Risco:** O Domínio gera um ID único e executa a regra de cálculo de risco interno.
@@ -58,8 +60,8 @@ Abaixo está o ciclo de vida completo de uma transação, mapeando o comportamen
 2. **Decisão:** O n8n define o status final ("Aprovado"/"Recusado").
 
 ### Fase E: O Callback (O Retorno)
-1. **Recepção Inbound:** O n8n faz um POST para a nossa rota `/callback/transactions`.
-   - *Arquivos:* `src/presentation/http/routes/callback.routes.ts` e `src/presentation/http/controllers/CallbackController.ts`
+1. **Recepção Inbound:** O n8n faz um `PATCH` autenticado (bearer token) para a nossa rota `/callback/transactions`.
+   - *Arquivos:* `src/presentation/routes/callback.routes.ts` e `src/presentation/controllers/CallbackController.ts`
 2. **Orquestração Final:** O sistema processa o callback.
    - *Arquivo:* `src/application/use-cases/UpdateTransactionStatusUseCase.ts`
 3. **Atualização no Banco:** Execução do `UPDATE` transacional no Oracle.

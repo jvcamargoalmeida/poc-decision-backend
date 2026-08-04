@@ -12,6 +12,7 @@ function createDeps() {
   const transactionRepository: ITransactionRepository = {
     save: vi.fn(),
     findById: vi.fn(),
+    updateStatus: vi.fn(),
   };
   const riskStrategy: IRiskStrategy = {
     calculateRisk: vi.fn(),

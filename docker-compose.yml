@@ -81,8 +81,26 @@ services:
       - N8N_PROTOCOL=http
       - WEBHOOK_URL=http://localhost:5678/
       - GENERIC_TIMEZONE=America/Sao_Paulo
+      # Usado apenas para materializar a credencial "Callback Auth" no boot
+      # (ver n8n-workflows/credentials.template.json). Valor vem do .env local.
+      - CALLBACK_AUTH_TOKEN=${CALLBACK_AUTH_TOKEN:-}
     volumes:
       - n8n-data:/home/node/.n8n
+      - ./n8n-workflows:/n8n-workflows
+    entrypoint: ["tini", "--", "/bin/sh", "-c"]
+    command:
+      - |
+        if [ -f /n8n-workflows/fraud-analysis.json ] && [ ! -f /home/node/.n8n/.workflow-imported ]; then
+          echo "Importando workflow do n8n pela primeira vez...";
+          n8n import:workflow --input=/n8n-workflows/fraud-analysis.json && touch /home/node/.n8n/.workflow-imported;
+        fi;
+        if [ -f /n8n-workflows/credentials.template.json ] && [ -n "$$CALLBACK_AUTH_TOKEN" ]; then
+          echo "Sincronizando credenciais do n8n a partir do .env...";
+          sed "s|__CALLBACK_AUTH_TOKEN__|$$CALLBACK_AUTH_TOKEN|g" /n8n-workflows/credentials.template.json > /tmp/n8n-credentials.json;
+          n8n import:credentials --input=/tmp/n8n-credentials.json --decrypted;
+          rm -f /tmp/n8n-credentials.json;
+        fi;
+        exec n8n start
     depends_on:
       - rabbitmq
       - mongodb

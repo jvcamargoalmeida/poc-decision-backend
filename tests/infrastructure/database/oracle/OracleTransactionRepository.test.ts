@@ -136,4 +136,34 @@ describe('OracleTransactionRepository', () => {
       expect(close).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('updateStatus', () => {
+    it('atualiza o status da transação no Oracle', async () => {
+      const execute = vi.fn().mockResolvedValue({ rowsAffected: 1 });
+      const close = vi.fn().mockResolvedValue(undefined);
+      const pool = createFakePool({ execute, close });
+
+      const repo = new OracleTransactionRepository(pool);
+      await repo.updateStatus('abc-123', TransactionStatus.COMPLETED);
+
+      expect(execute).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE transactions'),
+        { status: TransactionStatus.COMPLETED, id: 'abc-123' },
+        { autoCommit: true },
+      );
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it('propaga erro do Oracle e ainda assim fecha a conexão', async () => {
+      const dbError = new Error('ORA-00001: unique constraint violated');
+      const execute = vi.fn().mockRejectedValue(dbError);
+      const close = vi.fn().mockResolvedValue(undefined);
+      const pool = createFakePool({ execute, close });
+
+      const repo = new OracleTransactionRepository(pool);
+
+      await expect(repo.updateStatus('abc-123', TransactionStatus.FAILED)).rejects.toThrow(dbError);
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+  });
 });

@@ -1,0 +1,189 @@
+[
+  {
+    "updatedAt": "2026-08-04T17:42:56.782Z",
+    "createdAt": "2026-08-04T15:36:32.538Z",
+    "id": "HzZSnB2P7GmjA1Zj",
+    "name": "Decision",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "decision",
+          "responseMode": "lastNode",
+          "responseData": "allEntries",
+          "options": {
+            "rawBody": false
+          }
+        },
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2.1,
+        "position": [
+          0,
+          0
+        ],
+        "id": "8d5ef069-a24a-4059-bbd7-978b3f5f39f6",
+        "name": "Webhook",
+        "webhookId": "b1ee7529-0fc8-4fb4-a6a8-32c74e2d7d2d"
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "loose",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "a6b8156e-a1a2-4b2f-87a7-0f41c036eeda",
+                "leftValue": "={{ $json.body.data.riskScore }}",
+                "rightValue": "HIGH",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "or"
+          },
+          "looseTypeValidation": true,
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          208,
+          0
+        ],
+        "id": "2b4de2ba-cbe0-4087-93bf-ecd686dfad26",
+        "name": "If"
+      },
+      {
+        "parameters": {
+          "method": "PATCH",
+          "url": "http://host.docker.internal:3000/callback/transactions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"id\": \"{{ $json.body.data.id }}\",\n  \"status\": \"COMPLETED\"\n}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          448,
+          80
+        ],
+        "id": "f066e09d-13ee-409b-8c82-f2baaa13d9c1",
+        "name": "HTTP Request",
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "7EqVVyDtd0zkQhyZ",
+            "name": "Callback Auth"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "method": "PATCH",
+          "url": "http://host.docker.internal:3000/callback/transactions",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpBearerAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={\n  \"id\": \"{{ $json.body.data.id }}\",\n  \"status\": \"FAILED\"\n}",
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          448,
+          -112
+        ],
+        "id": "907cf2bc-b52d-4373-b143-4df68af334d1",
+        "name": "HTTP Request1",
+        "credentials": {
+          "httpBearerAuth": {
+            "id": "7EqVVyDtd0zkQhyZ",
+            "name": "Callback Auth"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Webhook": {
+        "main": [
+          [
+            {
+              "node": "If",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "If": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request1",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "HTTP Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1",
+      "binaryMode": "separate",
+      "availableInMCP": false
+    },
+    "staticData": null,
+    "meta": null,
+    "nodeGroups": [],
+    "pinData": {},
+    "versionId": "074f62b7-f534-411d-b3ab-c28f99621bd8",
+    "activeVersionId": "074f62b7-f534-411d-b3ab-c28f99621bd8",
+    "versionCounter": 114,
+    "triggerCount": 1,
+    "sourceWorkflowId": null,
+    "tags": [],
+    "shared": [
+      {
+        "updatedAt": "2026-08-04T17:38:11.819Z",
+        "createdAt": "2026-08-04T17:38:11.819Z",
+        "role": "workflow:owner",
+        "workflowId": "HzZSnB2P7GmjA1Zj",
+        "projectId": "BYVLhD7aMg72UJQD",
+        "project": {
+          "updatedAt": "2026-08-04T17:41:53.315Z",
+          "createdAt": "2026-08-04T17:38:11.134Z",
+          "id": "BYVLhD7aMg72UJQD",
+          "name": "ewd dasda dasdsa dasd <dasdas@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null,
+          "customTelemetryTags": [],
+          "creatorId": "8e432ab8-fbce-48ed-b30c-9b5f77a9b0fe"
+        }
+      }
+    ],
+    "versionMetadata": {
+      "name": "Version 074f62b7",
+      "description": ""
+    }
+  }
+]

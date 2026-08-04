@@ -39,6 +39,8 @@ npm install
 cp .env.example .env
 
 # sobe RabbitMQ, MongoDB, Oracle XE e n8n
+# (o n8n já importa o fluxo de decisão sozinho na 1ª subida, ver n8n-workflows/README.md —
+# só falta ativá-lo manualmente em http://localhost:5678 depois)
 docker compose up -d
 
 npm run dev
@@ -72,6 +74,7 @@ src/
 └── presentation/         # Servidor Fastify, rotas e plugins
 tests/                    # Testes unitários (espelha a estrutura de src/)
 db/oracle/init/           # Scripts .sql/.sh rodados na 1ª inicialização do Oracle (ver README na pasta)
+n8n-workflows/            # Fluxos do n8n exportados (.json) para importação manual (ver README na pasta)
 ```
 
 Os limites do que a IA pode gerar em cada camada estão documentados em [`CLAUDE.md`](CLAUDE.md).
@@ -86,9 +89,13 @@ O pipeline (`.github/workflows/ci.yml`) roda em todo Pull Request e push para `m
 
 Não há Dependabot no projeto (removido — atualizações de dependência são feitas manualmente, uma de cada vez). Detalhes em [`CLAUDE.md`](CLAUDE.md).
 
-## 🔐 Variáveis de ambiente
+## 🔐 Variáveis de ambiente e autenticação
 
 Veja [`.env.example`](.env.example) para a lista completa (Oracle, MongoDB, RabbitMQ, n8n e configurações do servidor).
+
+A rota de callback (`PATCH /callback/transactions`) é protegida por *bearer token* — sem credencial válida responde `401`. O segredo vem de `CALLBACK_AUTH_TOKEN` e é comparado em tempo constante (`crypto.timingSafeEqual` sobre o hash SHA-256 dos valores, para não vazar informação por timing nem pelo comprimento do token). Não há dependência externa: só o `crypto` nativo do Node.
+
+O n8n envia esse header através de uma credencial *Bearer Auth*. Credenciais não são versionadas junto com o workflow (o segredo não entra no git) — em vez disso, o `docker-compose.yml` materializa a credencial no boot a partir de um template com placeholder, injetando o valor do `.env` (ver [`n8n-workflows/README.md`](n8n-workflows/README.md)).
 
 ## 📚 Documentação
 

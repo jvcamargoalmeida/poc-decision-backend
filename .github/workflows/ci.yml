@@ -79,14 +79,18 @@ jobs:
         run: npm run build
 
       - name: Dev script smoke test
-        env:
-          ORACLE_USER: transaction_app
-          ORACLE_PASSWORD: transactionpassword
-          ORACLE_CONNECT_STRING: localhost:1521/XEPDB1
-          MONGO_URI: mongodb://admin:adminpassword@localhost:27017/transaction_logs?authSource=admin
-          RABBITMQ_URL: amqp://admin:adminpassword@localhost:5672
-          RABBITMQ_QUEUE_TRANSACTIONS: transactions.queue
         run: |
+          # O bootstrap valida no boot toda variavel obrigatoria (Oracle, Mongo,
+          # RabbitMQ, N8N_WEBHOOK_URL, CALLBACK_AUTH_TOKEN...). Partir do
+          # .env.example, em vez de duplicar cada variavel aqui, faz com que
+          # qualquer variavel nova adicionada la passe a existir automaticamente
+          # neste job — antes, cada variavel nova quebrava o smoke test ate alguem
+          # lembrar de replica-la no workflow.
+          #
+          # Isso funciona porque o .env.example ja descreve exatamente o ambiente
+          # do docker-compose (localhost + mesmas credenciais), que e o que os
+          # service containers deste job reproduzem.
+          cp .env.example .env
           npm run dev &
           DEV_PID=$!
           for i in $(seq 1 15); do
