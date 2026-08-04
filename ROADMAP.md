@@ -9,7 +9,7 @@ Acompanhamento das entregas e fases de implementação da Prova de Conceito (PoC
 - [x] Configuração do framework de testes (Vitest) com threshold obrigatório de 95% de cobertura.
 - [x] Implementação de pipeline CI/CD (GitHub Actions) com branch protection.
 
-## Fase 2: Core Domain e Casos de Uso [Em Andamento]
+## Fase 2: Core Domain e Casos de Uso [Concluído]
 - [x] Modelagem de Entidades e Enums de Domínio (`Transaction`, `RiskLevel`).
 - [x] Implementação do Design Pattern Strategy para regras de negócio e cálculo de risco.
 - [x] Definição de Ports (Interfaces de Repositório).
@@ -39,13 +39,13 @@ Acompanhamento das entregas e fases de implementação da Prova de Conceito (PoC
 - [x] Autenticação da rota de callback (*bearer token* via `CALLBACK_AUTH_TOKEN`, hook `preHandler` do Fastify em `presentation/middlewares/bearer-auth.ts`). Comparação em tempo constante com `crypto.timingSafeEqual` sobre o hash SHA-256 dos valores — o hash normaliza o tamanho dos buffers, evitando tanto a exceção do `timingSafeEqual` com tamanhos diferentes quanto o vazamento do comprimento do segredo. Zero dependência externa. O hook lança `UnauthorizedError` (`statusCode` 401) em vez de responder direto, deixando o `errorHandler` global padronizar corpo e log. No n8n o header vem de uma credencial *Header Auth*, que não é versionada no `fraud-analysis.json` (segredo fora do git) e precisa ser recriada por ambiente.
 - [x] Erros de domínio isolados em `src/domain/errors/` (`DomainError` abstrato + `TransactionNotFoundError`), fora do arquivo do Use Case. A base deliberadamente não carrega `statusCode`: o domínio não conhece HTTP, e o mapeamento erro → status fica na camada de apresentação.
 
-## Fase 6: Observabilidade e Resiliência [Em Andamento]
+## Fase 6: Observabilidade e Resiliência [Concluído]
 
 - [x] Configuração de Structured Logging com Winston (formato JSON estrito: `timestamp` + `errors({stack:true})` + `json()`, com `defaultMeta.service`).
-- [ ] Instrumentação de logs nos Casos de Uso. Infraestrutura e apresentação já logam (repositórios, publisher, worker, conexões, error handler, `CallbackController`), mas `ProcessTransactionUseCase` e `UpdateTransactionStatusUseCase` ainda não emitem nenhum log — não dá para rastrear uma transação pelo caminho de orquestração.
+- [x] Instrumentação de logs nos Casos de Uso: `ProcessTransactionUseCase` registra a transação persistida (com `transactionId`, valor, moeda e risco) e `UpdateTransactionStatusUseCase` registra a transição de status (com o status anterior e o novo), fechando o rastreio da transação pelo caminho de orquestração. Infraestrutura e apresentação já logavam.
 - [x] Implementação de rotinas de Graceful Shutdown (`infrastructure/lifecycle/graceful-shutdown.ts`, registrado no `server.ts`). Responde a `SIGTERM`/`SIGINT`, encerra na ordem correta (HTTP → worker → RabbitMQ → Mongo → Oracle: primeiro para de aceitar trabalho novo, depois fecha as conexões que esse trabalho usaria), tolera falha de um passo sem abortar os demais (sai com código 1 nesse caso) e tem timeout de 10s que força a saída se algum recurso travar. Validado com `SIGTERM` real: os 5 recursos fecharam em ~100ms e o processo saiu limpo.
 
-## Fase 7: Qualidade e Testes (QA)
+## Fase 7: Qualidade e Testes (QA) [Concluído]
 - [x] Testes unitários das estratégias de domínio (`AmountRiskStrategy`, 100% de cobertura).
 - [x] Testes unitários do repositório Oracle (`OracleTransactionRepository`: `save`/`findById`, incluindo tratamento de erro do driver e não vazamento de conexão).
 - [x] Testes unitários dos casos de uso (`ProcessTransactionUseCase`, aplicando mocks de `ITransactionRepository`/`IRiskStrategy`).
