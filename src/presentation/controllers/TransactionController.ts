@@ -6,6 +6,8 @@ interface CreateTransactionBody {
   currency: string;
 }
 
+export type { CreateTransactionBody };
+
 class TransactionController {
   constructor(private readonly processTransactionUseCase: ProcessTransactionUseCase) { }
 

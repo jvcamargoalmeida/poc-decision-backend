@@ -9,6 +9,7 @@ import { connectRabbitMQ, closeRabbitMQ } from '@/infrastructure/messaging/rabbi
 import { TransactionWorker } from '@/infrastructure/messaging/rabbitmq/workers/TransactionWorker';
 import { N8nWebhookClient } from './infrastructure/external/n8n/N8nWebhookClient';
 import { createBearerAuthHook } from '@/presentation/middlewares/bearer-auth';
+import { createRateLimitHook } from '@/presentation/middlewares/rate-limit';
 import { registerGracefulShutdown } from '@/infrastructure/lifecycle/graceful-shutdown';
 
 const app = Fastify({
@@ -59,12 +60,27 @@ async function bootstrap(): Promise<void> {
     throw new Error('CALLBACK_AUTH_TOKEN is not defined');
   }
 
+  // Credencial separada da do callback de proposito: sao atores distintos (cliente
+  // da API vs. n8n). Compartilhar o segredo faria o vazamento de um virar acesso ao
+  // outro. Apontar as duas variaveis para o mesmo valor continua sendo uma opcao.
+  const apiAuthToken = process.env.API_AUTH_TOKEN;
+  if (!apiAuthToken) {
+    throw new Error('API_AUTH_TOKEN is not defined');
+  }
+
+  const rateLimitHook = createRateLimitHook({
+    max: Number(process.env.RATE_LIMIT_MAX) || 300,
+    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
+  });
+
   await registerRoutes(
     app,
     oraclePool,
     rabbitChannel,
     mongoClient.connection,
     createBearerAuthHook(callbackAuthToken),
+    createBearerAuthHook(apiAuthToken),
+    rateLimitHook,
   );
 
   try {
