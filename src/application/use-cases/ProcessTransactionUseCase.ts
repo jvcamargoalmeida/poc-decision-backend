@@ -4,6 +4,7 @@ import { IEventPublisher } from '@/domain/events/IEventPublisher';
 import { IAuditRepository } from '@/domain/repositories/IAuditRepository';
 import { ITransactionRepository } from '@/domain/repositories/ITransactionRepository';
 import { IRiskStrategy } from '@/domain/strategies/risk/IRiskStrategy';
+import { logger } from '@/infrastructure/logger/winston.logger';
 
 class ProcessTransactionUseCase {
   constructor(
@@ -27,6 +28,11 @@ class ProcessTransactionUseCase {
     const savedTransaction = await this.transactionRepository.save(transaction);
 
     if (!savedTransaction.id) throw new Error('Erro ao salvar transação: ID não gerado');
+
+    logger.info('Transação persistida', {
+      transactionId: savedTransaction.id,
+      amount, currency, riskScore,
+    });
 
     await this.mQPublisher.publish(`transaction.created`, savedTransaction);
     await this.auditRepository.logTransaction(savedTransaction.id, savedTransaction);
