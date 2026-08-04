@@ -22,7 +22,7 @@ A arquitetura dispensa o uso de ORMs pesados em favor de drivers nativos e padr�
 1. **Ingestão síncrona:** `POST /transactions` → cálculo de risco interno (Strategy Pattern) → persistência no Oracle (SQL nativo) → resposta `201/202` imediata ao cliente, sem esperar processamento externo.
 2. **Auditoria e distribuição (assíncrono):** o payload bruto é gravado no MongoDB (data lake/compliance) e um evento "Transação Criada" é publicado no RabbitMQ.
 3. **Decisão externa:** um Worker consome a fila e dispara um Webhook para o **n8n**, que roda o fluxo visual de decisão (simulando engines de fraude/crédito).
-4. **Callback:** o n8n retorna a decisão via `POST /callback/transactions`, atualizando o status final da transação no Oracle.
+4. **Callback:** o n8n retorna a decisão via `PATCH /callback/transactions` (autenticado por *bearer token*), atualizando o status final da transação no Oracle.
 
 A especificação funcional/não funcional completa (RF/RNF) e o mapeamento arquivo-a-arquivo de cada fase estão em [`SPECIFICATION.md`](SPECIFICATION.md). O progresso real da implementação (o que já está pronto vs. planejado) está em [`ROADMAP.md`](ROADMAP.md).
 
@@ -59,22 +59,26 @@ O servidor sobe em `http://localhost:3000`; `GET /health` retorna o status da ap
 | `npm test`              | Executa a suíte de testes unitários (Vitest) uma única vez |
 | `npm run test:watch`    | Executa os testes em modo watch                            |
 | `npm run test:coverage` | Executa os testes com relatório de cobertura               |
+| `npm run test:load`     | Teste de carga com Autocannon (ver [`LOAD-TEST.md`](LOAD-TEST.md)) |
 
 ## 🗂️ Estrutura do projeto
 
 ```text
 src/
-├── domain/
+├── domain/               # Regras e contratos, sem dependência de framework
 │   ├── entities/         # Transaction
 │   ├── enums/            # RiskLevel, TransactionStatus
-│   ├── repositories/     # ITransactionRepository (interface)
+│   ├── errors/           # DomainError, TransactionNotFoundError
+│   ├── events/           # IEventPublisher
+│   ├── repositories/     # ITransactionRepository, IAuditRepository
+│   ├── services/         # IDecisionGateway
 │   └── strategies/risk/  # IRiskStrategy, AmountRiskStrategy
-├── application/          # Use Cases (ProcessTransactionUseCase)
-├── infrastructure/       # Oracle (pool + repository), Mongo, RabbitMQ, Winston
-└── presentation/         # Servidor Fastify, rotas e plugins
+├── application/          # Use Cases (Process / UpdateTransactionStatus)
+├── infrastructure/       # Implementações: Oracle, Mongo, RabbitMQ, n8n, Winston, shutdown
+└── presentation/         # Fastify: rotas, controllers, middlewares e composition root
 tests/                    # Testes unitários (espelha a estrutura de src/)
 db/oracle/init/           # Scripts .sql/.sh rodados na 1ª inicialização do Oracle (ver README na pasta)
-n8n-workflows/            # Fluxos do n8n exportados (.json) para importação manual (ver README na pasta)
+n8n-workflows/            # Fluxo do n8n versionado + template de credencial, importados no boot (ver README na pasta)
 ```
 
 Os limites do que a IA pode gerar em cada camada estão documentados em [`CLAUDE.md`](CLAUDE.md).
@@ -105,3 +109,4 @@ O n8n envia esse header através de uma credencial *Bearer Auth*. Credenciais n�
 | [`ROADMAP.md`](ROADMAP.md) | Progresso real da implementação, fase a fase |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Diagramas de eventos, entidades e sistema (Mermaid) |
 | [`CLAUDE.md`](CLAUDE.md) | Padrões de engenharia e limites de geração automatizada de código por IA |
+| [`LOAD-TEST.md`](LOAD-TEST.md) | Resultados do teste de carga e os gargalos que ele revelou |

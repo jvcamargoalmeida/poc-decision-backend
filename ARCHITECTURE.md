@@ -141,9 +141,35 @@ presença do ID logo após o `save` e falha explicitamente se ele não vier.
 `DomainError` deliberadamente **não** carrega status HTTP — o domínio não conhece o protocolo de
 transporte; o mapeamento erro → status acontece na camada de apresentação.
 
-## 3. Arquitetura do Sistema
+## 3. Arquitetura do Sistema (C4)
 
-Visão de contêineres (estilo C4) das quatro camadas e da infraestrutura externa.
+### 3.1 Nível 1 — Contexto
+
+Quem usa o sistema e com que sistemas externos ele conversa.
+
+```mermaid
+flowchart TB
+    Client([Cliente / sistema consumidor])
+
+    subgraph Boundary[" "]
+        System["<b>poc-decision-backend</b><br/>Motor de processamento<br/>financeiro orientado a eventos"]
+    end
+
+    N8n["<b>n8n</b><br/>Orquestrador de decisão externo<br/>(simula engine de fraude/crédito)"]
+
+    Client -->|"submete transação<br/>HTTP/JSON"| System
+    System -->|"solicita decisão<br/>webhook HTTP"| N8n
+    N8n -->|"devolve decisão<br/>callback autenticado"| System
+
+    style Boundary fill:none,stroke:#888,stroke-dasharray:4 4
+```
+
+A separação importa: o cálculo de risco *preliminar* é interno e síncrono; a decisão *final* é
+externa e assíncrona. É isso que permite responder ao cliente sem esperar o orquestrador.
+
+### 3.2 Nível 2 — Contêineres
+
+Visão das quatro camadas e da infraestrutura.
 
 ```mermaid
 flowchart TB
@@ -202,6 +228,53 @@ flowchart TB
 A dependência aponta sempre para dentro: `Presentation → Application → Domain`, com
 `Infrastructure` implementando as interfaces do domínio. A montagem concreta (quem injeta o quê)
 fica isolada no composition root em `src/presentation/container.ts`.
+
+## 4. Modelo de Dados (DER)
+
+A persistência é híbrida e **não** há chave estrangeira entre os dois bancos — o vínculo é lógico,
+pela aplicação. Isso é deliberado: são tecnologias distintas, com propósitos distintos.
+
+```mermaid
+erDiagram
+    TRANSACTIONS ||--o| AUDITLOGS : "referenciada por (vinculo logico)"
+
+    TRANSACTIONS {
+        VARCHAR2_32 id PK "DEFAULT SYS_GUID()"
+        NUMBER_15_2 amount "NOT NULL"
+        VARCHAR2_3 currency "NOT NULL"
+        VARCHAR2_20 status "NOT NULL, DEFAULT PENDING"
+        VARCHAR2_20 risk_score "NOT NULL"
+        TIMESTAMP created_at "NOT NULL, DEFAULT CURRENT_TIMESTAMP"
+    }
+
+    AUDITLOGS {
+        ObjectId _id PK
+        String transactionId UK "required, unique, index"
+        Mixed payload "required"
+        Date createdAt "default now"
+    }
+```
+
+**Oracle — `transactions`** (fonte de verdade transacional, schema em
+[`db/oracle/init/TRANSACTION.sql`](db/oracle/init/TRANSACTION.sql)): o `id` é gerado pelo banco
+via `SYS_GUID()` e devolvido à aplicação pelo `RETURNING id INTO`. `status` e `risk_score` são
+`VARCHAR2` livres no banco — as restrições de valor vivem nos enums `TransactionStatus` e
+`RiskLevel` da aplicação, não em *check constraints*.
+
+**MongoDB — `auditlogs`** (retenção de payload bruto, schema em
+[`AuditLog.model.ts`](src/infrastructure/database/mongo/AuditLog.model.ts)): `payload` é
+`Schema.Types.Mixed`, ou seja, guarda o documento como veio, sem impor forma — é o que se espera
+de um *data lake* de compliance.
+
+Dois pontos que valem atenção nesse modelo:
+
+- **`transactionId` é `unique`** na coleção de auditoria, então existe no máximo **um** registro
+  por transação. Hoje isso é consistente (só a criação é auditada), mas impede auditar eventos
+  posteriores da mesma transação — auditar a mudança de status vinda do callback, por exemplo,
+  falharia por chave duplicada. Se a auditoria evoluir para trilha de eventos, a unicidade precisa
+  sair ou virar composta com o tipo de evento.
+- **Sem *check constraint* em `status`/`risk_score`**: um `UPDATE` fora da aplicação pode gravar
+  qualquer texto. A validação por enum acontece na borda HTTP (JSON Schema) e no TypeScript.
 
 ---
 

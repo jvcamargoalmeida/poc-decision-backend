@@ -50,26 +50,31 @@ Acompanhamento das entregas e fases de implementação da Prova de Conceito (PoC
 - [x] Testes unitários do repositório Oracle (`OracleTransactionRepository`: `save`/`findById`, incluindo tratamento de erro do driver e não vazamento de conexão).
 - [x] Testes unitários dos casos de uso (`ProcessTransactionUseCase`, aplicando mocks de `ITransactionRepository`/`IRiskStrategy`).
 - [x] Testes unitários da camada de apresentação (`TransactionController`, error handler, registro de rotas).
-- [ ] Testes unitários do `CallbackController` (Fase 5, ainda não implementado).
+- [x] Testes unitários do `CallbackController` (sucesso, `404` via `TransactionNotFoundError`, `500` sem vazar detalhe interno) e do `UpdateTransactionStatusUseCase`.
 - [x] Testes unitários de mensageria/auditoria (`RabbitMQPublisher`: serialização e publicação na exchange, propagação de erro; `MongoAuditRepository`: criação e gravação do documento via Model injetado, propagação de erro; `TransactionWorker`: registro do listener, processamento com `ack`/`nack` corretos, mensagem `null` ignorada, `stop()` com e sem consumer ativo, ordem `requestDecision` → `publish` comprovada via `invocationCallOrder`, `publish` não ocorre se o n8n falhar; `N8nWebhookClient`: chamada HTTP via `fetch` mockado, erro em resposta não-OK e em falha de rede).
 - [x] Validação de aderência ao threshold de 95% em pipeline (gate ativo desde a Fase 1).
 
-## Fase 8: Documentação Arquitetural
-- [ ] Modelagem do Diagrama Entidade-Relacionamento (DER).
-- [ ] Mapeamento de Arquitetura em Modelo C4 (Contexto e Contêiner).
-- [ ] Diagrama de Sequência de Transações (API -> Fila -> n8n -> Banco).
+## Fase 8: Documentação Arquitetural [Concluído]
 
-## Fase 9: Testes de Carga e Validação Arquitetural
-*Ver `SPECIFICATION.md`, seção 4.*
-- [ ] Cenário de carga com Autocannon simulando pico de requisições contra `POST /transactions`.
-- [ ] Validação de estabilidade da Fase A (ingestão síncrona) sob concorrência extrema.
-- [ ] Registro dos resultados (throughput, latência p95/p99) como evidência de aderência ao RNF01.
+- [x] Modelagem do Diagrama Entidade-Relacionamento (DER) em `ARCHITECTURE.md`, cobrindo `transactions` (Oracle) e `auditlogs` (MongoDB) e explicitando que o vínculo entre os dois é lógico, feito pela aplicação, sem chave estrangeira.
+- [x] Mapeamento de Arquitetura em Modelo C4 (Contexto e Contêiner) em `ARCHITECTURE.md`.
+- [x] Diagrama de Sequência de Transações (API -> Oracle -> Fila -> Worker -> n8n -> Callback) em `ARCHITECTURE.md`, incluindo as ordenações deliberadas que evitam "evento fantasma".
+- [x] Todos os diagramas Mermaid validados com `mermaid-cli` (renderizam de fato, não apenas "parecem certos").
+
+## Fase 9: Testes de Carga e Validação Arquitetural [Concluído]
+*Cenário em `SPECIFICATION.md` seção 4; resultados completos em [`LOAD-TEST.md`](LOAD-TEST.md).*
+
+- [x] Cenário de carga com Autocannon (`npm run test:load`: 100 conexões, 30s) contra `POST /transactions`, executado sobre o build compilado e não sobre o `ts-node-dev`.
+- [x] Validação de estabilidade da Fase A: **nenhuma resposta não-2xx** e todas as ~15,5 mil transações gravadas no Oracle. A borda síncrona sustentou a carga.
+- [x] Registro dos resultados: ~515 req/s, p50 108ms, p99 1.947ms com 100 conexões.
+- [x] **Achado**: mais concorrência entregou *menos* throughput (774 req/s com 10 conexões vs 515 com 100) — saturação, provavelmente por `ORACLE_POOL_MAX=10` somado a `publish`/`logTransaction` estarem dentro da requisição.
+- [x] **Achado crítico**: o gargalo real foi o n8n, não a API. Ele passou a responder `503` sob carga e 7.866 mensagens foram descartadas definitivamente pelo `nack` sem requeue — metade das transações aceitas com `201` nunca recebeu decisão e ficou presa em `PENDING`, sem o cliente saber.
 
 ## Gaps Conhecidos (Débito Técnico Documentado)
 
 - **Idempotência / "phantom row" no `OracleTransactionRepository.save()`**: o INSERT roda com `autoCommit: true`; se a leitura do `outBinds` falhar *depois* do commit (ex.: driver não retornar o bind de saída por algum motivo), a linha já foi persistida no Oracle mas o método lança erro e o chamador recebe uma falha — a transação existe no banco sem que a aplicação saiba o ID gerado. Não há chave de idempotência nem constraint única para permitir um retry seguro (reconciliar com o registro já existente em vez de duplicar). Correção recomendada: introduzir uma idempotency key (gerada pelo client ou pelo `ProcessTransactionUseCase`) com constraint única na tabela e um `findByIdempotencyKey` de apoio, em vez de tratar o sintoma reativamente dentro de `save()`.
 - **`POST /transactions` sem autenticação**: a rota de ingestão aceita qualquer chamador. Só `PATCH /callback/transactions` exige credencial (`GET /health` é aberta por design). Para uma PoC de ingestão isso é defensável, mas num motor financeiro real a rota que cria transação precisaria de autenticação (API key por cliente ou JWT) e de atribuição de identidade para auditoria — hoje o audit log no Mongo registra *o que* aconteceu, não *quem* pediu.
-- **Sem rate limiting em nenhuma rota**: o RNF01 exige alta volumetria, mas não há nada limitando um único cliente. Sem isso, um chamador (ou o próprio teste de carga da Fase 9) pode esgotar o *connection pool* do Oracle e derrubar o serviço para todos. Correção recomendada: limite por IP/credencial na camada de apresentação, com resposta `429`.
+- **Sem rate limiting em nenhuma rota**: o RNF01 exige alta volumetria, mas não há nada limitando um único cliente. Sem isso, um chamador (ou o próprio teste de carga da Fase 9) pode esgotar o *connection pool* do Oracle e derrubar o serviço para todos. Correção recomendada: limite por IP/credencial na camada de apresentação, com resposta `429`. O teste de carga confirmou o efeito prático: sem limite, a API repassou ao n8n mais carga do que ele aguentava, derrubando a etapa de decisão.
 - **Bypass de decisão via webhook do n8n**: o node `Webhook` do fluxo está sem autenticação (decisão consciente, para manter o setup simples). Como o n8n possui a credencial válida do callback, quem tiver acesso de rede ao container do n8n pode postar `{data:{id, riskScore}}` direto no webhook e fazer o n8n alterar o status de qualquer transação — contornando a autenticação do callback. Correção recomendada: exigir *Header Auth* no node `Webhook` e fazer o `N8nWebhookClient` enviar a credencial correspondente.
-- **Perda de mensagem sem *dead-letter queue***: o `TransactionWorker` usa `nack(msg, false, false)` em qualquer falha (JSON inválido, n8n fora do ar, erro ao republicar). O `requeue: false` é intencional — evita reprocessamento infinito de mensagem envenenada —, mas sem uma DLQ configurada a mensagem é **descartada definitivamente**, sem trilha para investigação ou reprocessamento manual. Correção recomendada: declarar a fila com `x-dead-letter-exchange` e criar a fila morta correspondente.
+- **Perda de mensagem sem *dead-letter queue***: o `TransactionWorker` usa `nack(msg, false, false)` em qualquer falha (JSON inválido, n8n fora do ar, erro ao republicar). O `requeue: false` é intencional — evita reprocessamento infinito de mensagem envenenada —, mas sem uma DLQ configurada a mensagem é **descartada definitivamente**, sem trilha para investigação ou reprocessamento manual. Correção recomendada: declarar a fila com `x-dead-letter-exchange` e criar a fila morta correspondente. **Deixou de ser hipótese**: o teste de carga da Fase 9 mediu 7.866 mensagens descartadas numa única execução de 30s, quando o n8n saturou e passou a responder `503` — ver [`LOAD-TEST.md`](LOAD-TEST.md).
 - **"Sucesso reportado como falha" em `ProcessTransactionUseCase.execute()`**: a transação é persistida no Oracle *antes* de publicar o evento (RabbitMQ) e gravar o audit log (Mongo), na ordem correta para evitar o "evento fantasma". Mas como as três chamadas (`save` → `publish` → `logTransaction`) estão em sequência com `await` direto e sem isolamento de erro, se o RabbitMQ ou o Mongo falharem *depois* do Oracle já ter persistido com sucesso, a exceção sobe do mesmo jeito e o cliente recebe `500` — mesmo com a transação realmente salva. Correção recomendada: isolar `publish`/`logTransaction` (ex.: `Promise.allSettled`, try/catch dedicado com log de severidade alta, ou mover para processamento assíncrono real via fila) para que uma falha de auditoria/evento não derrube a resposta de uma escrita síncrona que já teve sucesso.
