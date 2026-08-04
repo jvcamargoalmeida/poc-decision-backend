@@ -35,6 +35,30 @@ jobs:
           --health-interval=15s
           --health-timeout=10s
           --health-retries=10
+      mongodb:
+        image: mongo:latest
+        env:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: adminpassword
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd="mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+      rabbitmq:
+        image: rabbitmq:3-management-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: admin
+          RABBITMQ_DEFAULT_PASS: adminpassword
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd="rabbitmq-diagnostics -q ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -59,6 +83,9 @@ jobs:
           ORACLE_USER: transaction_app
           ORACLE_PASSWORD: transactionpassword
           ORACLE_CONNECT_STRING: localhost:1521/XEPDB1
+          MONGO_URI: mongodb://admin:adminpassword@localhost:27017/transaction_logs?authSource=admin
+          RABBITMQ_URL: amqp://admin:adminpassword@localhost:5672
+          RABBITMQ_QUEUE_TRANSACTIONS: transactions.queue
         run: |
           npm run dev &
           DEV_PID=$!
