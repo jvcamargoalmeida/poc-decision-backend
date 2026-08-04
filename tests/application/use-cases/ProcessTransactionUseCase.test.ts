@@ -95,7 +95,7 @@ describe('ProcessTransactionUseCase', () => {
     expect(auditRepository.logTransaction).not.toHaveBeenCalled();
   });
 
-  it('propaga o erro quando a publicação do evento falha', async () => {
+  it('não derruba a resposta quando a publicação do evento falha — a transação já está persistida', async () => {
     const { transactionRepository, riskStrategy, mqPublisher, auditRepository } = createDeps();
     vi.mocked(riskStrategy.calculateRisk).mockReturnValue(RiskLevel.LOW);
     const savedTransaction: Transaction = {
@@ -107,16 +107,17 @@ describe('ProcessTransactionUseCase', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
     };
     vi.mocked(transactionRepository.save).mockResolvedValue(savedTransaction);
-    const publishError = new Error('falha ao publicar evento');
-    vi.mocked(mqPublisher.publish).mockRejectedValue(publishError);
+    vi.mocked(mqPublisher.publish).mockRejectedValue(new Error('RabbitMQ fora do ar'));
+    vi.mocked(auditRepository.logTransaction).mockResolvedValue(undefined);
 
     const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
 
-    await expect(useCase.execute(100, 'BRL')).rejects.toThrow(publishError);
-    expect(auditRepository.logTransaction).not.toHaveBeenCalled();
+    await expect(useCase.execute(100, 'BRL')).resolves.toEqual(savedTransaction);
+    // Falha no evento nao impede a auditoria: as duas rodam em paralelo, isoladas.
+    expect(auditRepository.logTransaction).toHaveBeenCalled();
   });
 
-  it('propaga o erro quando a gravação do audit log falha', async () => {
+  it('não derruba a resposta quando a gravação do audit log falha', async () => {
     const { transactionRepository, riskStrategy, mqPublisher, auditRepository } = createDeps();
     vi.mocked(riskStrategy.calculateRisk).mockReturnValue(RiskLevel.LOW);
     const savedTransaction: Transaction = {
@@ -129,11 +130,33 @@ describe('ProcessTransactionUseCase', () => {
     };
     vi.mocked(transactionRepository.save).mockResolvedValue(savedTransaction);
     vi.mocked(mqPublisher.publish).mockResolvedValue(undefined);
-    const auditError = new Error('falha ao gravar audit log');
-    vi.mocked(auditRepository.logTransaction).mockRejectedValue(auditError);
+    vi.mocked(auditRepository.logTransaction).mockRejectedValue(new Error('Mongo fora do ar'));
 
     const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
 
-    await expect(useCase.execute(100, 'BRL')).rejects.toThrow(auditError);
+    await expect(useCase.execute(100, 'BRL')).resolves.toEqual(savedTransaction);
+    expect(mqPublisher.publish).toHaveBeenCalled();
+  });
+
+  it('ainda responde com sucesso quando evento E auditoria falham juntos', async () => {
+    const { transactionRepository, riskStrategy, mqPublisher, auditRepository } = createDeps();
+    vi.mocked(riskStrategy.calculateRisk).mockReturnValue(RiskLevel.LOW);
+    const savedTransaction: Transaction = {
+      id: 'generated-id',
+      amount: 100,
+      currency: 'BRL',
+      status: TransactionStatus.PENDING,
+      riskScore: RiskLevel.LOW,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+    vi.mocked(transactionRepository.save).mockResolvedValue(savedTransaction);
+    vi.mocked(mqPublisher.publish).mockRejectedValue(new Error('RabbitMQ fora do ar'));
+    vi.mocked(auditRepository.logTransaction).mockRejectedValue(new Error('Mongo fora do ar'));
+
+    const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
+
+    // O Oracle confirmou a escrita: devolver 500 aqui reportaria como falha algo que
+    // de fato aconteceu. O preco assumido e a transacao ficar PENDING sem decisao.
+    await expect(useCase.execute(100, 'BRL')).resolves.toEqual(savedTransaction);
   });
 });

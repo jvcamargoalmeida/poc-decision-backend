@@ -26,16 +26,25 @@ class ProcessTransactionUseCase {
     };
 
     const savedTransaction = await this.transactionRepository.save(transaction);
-
     if (!savedTransaction.id) throw new Error('Erro ao salvar transação: ID não gerado');
 
-    logger.info('Transação persistida', {
-      transactionId: savedTransaction.id,
-      amount, currency, riskScore,
-    });
+    logger.info('Transação persistida', { transactionId: savedTransaction.id, amount, currency, riskScore });
 
-    await this.mQPublisher.publish(`transaction.created`, savedTransaction);
-    await this.auditRepository.logTransaction(savedTransaction.id, savedTransaction);
+    const [eventoOk, auditoriaOk] = await Promise.allSettled([
+      this.mQPublisher.publish('transaction.created', savedTransaction),
+      this.auditRepository.logTransaction(savedTransaction.id, savedTransaction),
+    ]);
+
+    if (eventoOk.status === 'rejected') {
+      logger.error('Transação persistida mas evento não publicado — decisão não acontecerá', {
+        transactionId: savedTransaction.id, error: eventoOk.reason?.message,
+      });
+    }
+    if (auditoriaOk.status === 'rejected') {
+      logger.error('Transação persistida mas audit log não gravado', {
+        transactionId: savedTransaction.id, error: auditoriaOk.reason?.message,
+      });
+    }
 
     return savedTransaction;
   }

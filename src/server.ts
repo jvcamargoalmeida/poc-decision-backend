@@ -50,7 +50,12 @@ async function bootstrap(): Promise<void> {
     await rabbitChannel.assertExchange('amq.topic', 'topic', { durable: true });
     await rabbitChannel.assertQueue(transactionsQueue, { durable: true, deadLetterExchange });
     await rabbitChannel.bindQueue(transactionsQueue, 'amq.topic', 'transaction.created');
-    const decisionGateway = new N8nWebhookClient(n8nWebhookUrl);
+    const n8nWebhookToken = process.env.N8N_WEBHOOK_TOKEN;
+    if (!n8nWebhookToken) {
+      throw new Error('N8N_WEBHOOK_TOKEN is not defined');
+    }
+
+    const decisionGateway = new N8nWebhookClient(n8nWebhookUrl, n8nWebhookToken);
     transactionWorker = new TransactionWorker(rabbitChannel, transactionsQueue, decisionGateway);
     await transactionWorker.start();
   }
@@ -60,9 +65,6 @@ async function bootstrap(): Promise<void> {
     throw new Error('CALLBACK_AUTH_TOKEN is not defined');
   }
 
-  // Credencial separada da do callback de proposito: sao atores distintos (cliente
-  // da API vs. n8n). Compartilhar o segredo faria o vazamento de um virar acesso ao
-  // outro. Apontar as duas variaveis para o mesmo valor continua sendo uma opcao.
   const apiAuthToken = process.env.API_AUTH_TOKEN;
   if (!apiAuthToken) {
     throw new Error('API_AUTH_TOKEN is not defined');

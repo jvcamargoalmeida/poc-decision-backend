@@ -13,6 +13,9 @@ const sampleTransaction: Transaction = {
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
 };
 
+const WEBHOOK_URL = 'http://localhost:5678/webhook/decision';
+const WEBHOOK_TOKEN = 'token-do-webhook';
+
 describe('N8nWebhookClient', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -22,12 +25,15 @@ describe('N8nWebhookClient', () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchMock);
 
-    const client = new N8nWebhookClient('http://localhost:5678/webhook/decision');
+    const client = new N8nWebhookClient(WEBHOOK_URL, WEBHOOK_TOKEN);
     await client.requestDecision(sampleTransaction);
 
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:5678/webhook/decision', {
+    expect(fetchMock).toHaveBeenCalledWith(WEBHOOK_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${WEBHOOK_TOKEN}`,
+      },
       body: JSON.stringify(sampleTransaction),
     });
   });
@@ -36,7 +42,7 @@ describe('N8nWebhookClient', () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 });
     vi.stubGlobal('fetch', fetchMock);
 
-    const client = new N8nWebhookClient('http://localhost:5678/webhook/decision');
+    const client = new N8nWebhookClient(WEBHOOK_URL, WEBHOOK_TOKEN);
 
     await expect(client.requestDecision(sampleTransaction)).rejects.toThrow('n8n respondeu 500');
   });
@@ -46,8 +52,17 @@ describe('N8nWebhookClient', () => {
     const fetchMock = vi.fn().mockRejectedValue(networkError);
     vi.stubGlobal('fetch', fetchMock);
 
-    const client = new N8nWebhookClient('http://localhost:5678/webhook/decision');
+    const client = new N8nWebhookClient(WEBHOOK_URL, WEBHOOK_TOKEN);
 
     await expect(client.requestDecision(sampleTransaction)).rejects.toThrow(networkError);
+  });
+
+  it('lança erro quando o n8n recusa a credencial (403)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 403 });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new N8nWebhookClient(WEBHOOK_URL, WEBHOOK_TOKEN);
+
+    await expect(client.requestDecision(sampleTransaction)).rejects.toThrow('n8n respondeu 403');
   });
 });
