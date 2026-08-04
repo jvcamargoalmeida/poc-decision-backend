@@ -889,6 +889,88 @@
         }
       ],
       "response": []
+    },
+    {
+      "name": "Bulk Send (envio em massa)",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{url}}/health",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "health"
+          ]
+        },
+        "description": "Dispara **`{{bulkCount}}` transacoes de uma vez** (padrao 1000), com `amount` e `currency` sorteados cobrindo as tres faixas de risco.\n\nA requisicao em si e um `GET /health` inofensivo — serve so de gatilho. O trabalho todo acontece no script, via `pm.sendRequest`.\n\n### Como usar\n\n1. Ajuste a variavel `bulkCount` da colecao (ex.: `100`).\n2. Envie este request uma unica vez.\n3. Veja o resumo no **Console** do Postman (`View > Show Postman Console`).\n\nO id da ultima transacao criada e salvo em `transactionId`, entao o *Callback* continua utilizavel logo em seguida.\n\n### Cuidado com o rate limit\n\nO padrao e `RATE_LIMIT_MAX=300` por minuto **por IP**, e o contador e compartilhado entre as rotas. Um `bulkCount` acima disso comeca a receber `429` — o resumo informa quantas foram limitadas. Para volume maior, suba o servidor com `RATE_LIMIT_MAX` alto.\n\n### Isto nao e teste de carga\n\nO envio e **sequencial**: mede volume e valida comportamento, mas nao produz concorrencia. Para carga real use `npm run test:load` (Autocannon, 100 conexoes simultaneas) — resultados em `LOAD-TEST.md`.\n\n### O que esperar com volume alto\n\nCom `bulkCount` na casa do milhar o **n8n satura** e passa a responder `429` (\"The service is receiving too many requests from you\") ou `503`. Isso e esperado e ja estava medido em `LOAD-TEST.md`: o gargalo do sistema e o orquestrador externo, nao a API.\n\nA diferenca e que hoje essas mensagens **nao se perdem**: o worker rejeita com `requeue: false` e elas caem em `transactions.queue.dead`, com o header `x-death` preservando motivo e origem. Da para inspecionar e reprocessar pelo painel do RabbitMQ (`http://localhost:15672`). Antes da dead-letter queue, sumiam sem deixar rastro.\n\nPara reduzir a saturacao, o caminho seria limitar o `prefetch` do consumidor — hoje o worker puxa mensagens sem teto e por isso consegue martelar o n8n mais rapido do que ele aguenta (registrado como proximo passo no `LOAD-TEST.md`)."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Dispara `bulkCount` transacoes numa unica execucao, com valores aleatorios",
+              "// cobrindo as tres faixas de risco. Sequencial de proposito: pm.sendRequest em",
+              "// paralelo nao garante que os callbacks terminem antes do fim do script.",
+              "// pm.variables.get resolve em TODOS os escopos (environment, collection, runtime).",
+              "// pm.collectionVariables.get leria so o escopo de collection e devolveria vazio",
+              "// quando o token vem de um environment — foi exatamente o bug que quebrou este script.",
+              "const total   = Number(pm.variables.get('bulkCount')) || 25;",
+              "const base    = pm.variables.get('url');",
+              "const token   = pm.variables.get('apiToken');",
+              "const moedas  = ['BRL', 'USD', 'EUR'];",
+              "const faixas  = [[1, 5000], [5001, 10000], [10001, 90000]];  // LOW, MEDIUM, HIGH",
+              "",
+              "const resumo = { criadas: 0, limitadas: 0, falhas: 0 };",
+              "const ids = [];",
+              "",
+              "function sortearCorpo() {",
+              "  const [min, max] = faixas[Math.floor(Math.random() * faixas.length)];",
+              "  return {",
+              "    amount: Math.floor(Math.random() * (max - min + 1)) + min,",
+              "    currency: moedas[Math.floor(Math.random() * moedas.length)],",
+              "  };",
+              "}",
+              "",
+              "function disparar(restantes, aoTerminar) {",
+              "  if (restantes === 0) { aoTerminar(); return; }",
+              "  pm.sendRequest({",
+              "    url: base + '/transactions',",
+              "    method: 'POST',",
+              "    header: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },",
+              "    body: { mode: 'raw', raw: JSON.stringify(sortearCorpo()) },",
+              "  }, (erro, res) => {",
+              "    if (erro) { resumo.falhas += 1; }",
+              "    else if (res.code === 201) { resumo.criadas += 1; ids.push(res.json().id); }",
+              "    else if (res.code === 429) { resumo.limitadas += 1; }",
+              "    else { resumo.falhas += 1; }",
+              "    disparar(restantes - 1, aoTerminar);",
+              "  });",
+              "}",
+              "",
+              "disparar(total, () => {",
+              "  console.log('Envio em massa:', JSON.stringify(resumo));",
+              "  if (ids.length) { pm.collectionVariables.set('transactionId', ids[ids.length - 1]); }",
+              "",
+              "  pm.test('todas as ' + total + ' requisicoes obtiveram resposta', () =>",
+              "    pm.expect(resumo.criadas + resumo.limitadas + resumo.falhas).to.eql(total));",
+              "  pm.test('nenhuma falha inesperada', () => pm.expect(resumo.falhas).to.eql(0));",
+              "  if (resumo.limitadas > 0) {",
+              "    console.warn('429 em ' + resumo.limitadas + ' requisicoes: rate limit atingido.',",
+              "      'Suba o servidor com RATE_LIMIT_MAX maior ou reduza bulkCount.');",
+              "  }",
+              "});"
+            ]
+          }
+        }
+      ],
+      "response": []
     }
   ],
   "variable": [
@@ -915,6 +997,11 @@
     {
       "key": "transactionId",
       "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bulkCount",
+      "value": "1000",
       "type": "string"
     }
   ]
