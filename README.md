@@ -39,8 +39,8 @@ npm install
 cp .env.example .env
 
 # sobe RabbitMQ, MongoDB, Oracle XE e n8n
-# (o n8n já importa o fluxo de decisão sozinho na 1ª subida, ver n8n-workflows/README.md —
-# só falta ativá-lo manualmente em http://localhost:5678 depois)
+# (o n8n importa, publica e credencia o fluxo de decisão sozinho na 1ª subida —
+# ver n8n-workflows/README.md; nenhum passo manual é necessário)
 docker compose up -d
 
 npm run dev

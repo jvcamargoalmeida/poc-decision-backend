@@ -84,6 +84,7 @@ services:
       # Usado apenas para materializar a credencial "Callback Auth" no boot
       # (ver n8n-workflows/credentials.template.json). Valor vem do .env local.
       - CALLBACK_AUTH_TOKEN=${CALLBACK_AUTH_TOKEN:-}
+      - N8N_WEBHOOK_TOKEN=${N8N_WEBHOOK_TOKEN:-}
     volumes:
       - n8n-data:/home/node/.n8n
       - ./n8n-workflows:/n8n-workflows
@@ -92,11 +93,19 @@ services:
       - |
         if [ -f /n8n-workflows/fraud-analysis.json ] && [ ! -f /home/node/.n8n/.workflow-imported ]; then
           echo "Importando workflow do n8n pela primeira vez...";
-          n8n import:workflow --input=/n8n-workflows/fraud-analysis.json && touch /home/node/.n8n/.workflow-imported;
+          if n8n import:workflow --input=/n8n-workflows/fraud-analysis.json; then
+            touch /home/node/.n8n/.workflow-imported;
+            # A importacao sempre deixa o workflow inativo. Publicamos em seguida para
+            # que um ambiente novo ja suba com o fluxo funcionando, sem passo manual.
+            for wid in $$(sed -n 's/.*"id": "\([^"]*\)".*/\1/p' /n8n-workflows/fraud-analysis.json | head -1); do
+              echo "Publicando workflow $$wid...";
+              n8n publish:workflow --id="$$wid" || echo "AVISO: falha ao publicar; ative pela UI";
+            done;
+          fi;
         fi;
-        if [ -f /n8n-workflows/credentials.template.json ] && [ -n "$$CALLBACK_AUTH_TOKEN" ]; then
+        if [ -f /n8n-workflows/credentials.template.json ] && [ -n "$$CALLBACK_AUTH_TOKEN" ] && [ -n "$$N8N_WEBHOOK_TOKEN" ]; then
           echo "Sincronizando credenciais do n8n a partir do .env...";
-          sed "s|__CALLBACK_AUTH_TOKEN__|$$CALLBACK_AUTH_TOKEN|g" /n8n-workflows/credentials.template.json > /tmp/n8n-credentials.json;
+          sed -e "s|__CALLBACK_AUTH_TOKEN__|$$CALLBACK_AUTH_TOKEN|g" -e "s|__N8N_WEBHOOK_TOKEN__|$$N8N_WEBHOOK_TOKEN|g" /n8n-workflows/credentials.template.json > /tmp/n8n-credentials.json;
           n8n import:credentials --input=/tmp/n8n-credentials.json --decrypted;
           rm -f /tmp/n8n-credentials.json;
         fi;
