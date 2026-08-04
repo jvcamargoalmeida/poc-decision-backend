@@ -6,6 +6,10 @@ import { TransactionStatus } from '@/domain/enums/TransactionStatus';
 import { RiskLevel } from '@/domain/enums/RiskLevel';
 import type { Transaction } from '@/domain/entities/Transaction';
 
+vi.mock('@/infrastructure/logger/winston.logger', () => ({
+  logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+}));
+
 function createDeps() {
   const transactionRepository: ITransactionRepository = {
     save: vi.fn(),
