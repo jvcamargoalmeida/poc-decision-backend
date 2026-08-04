@@ -11,10 +11,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:load": "npx --yes autocannon -c 100 -d 30 -m POST -H \"Content-Type: application/json\" -b '{\"amount\": 15000, \"currency\": \"BRL\"}' http://localhost:3000/transactions"
+    "test:load": "npx --yes autocannon -c 100 -d 30 -m POST -H \"Content-Type: application/json\" -b '{\"amount\": 15000, \"currency\": \"BRL\"}' http://localhost:3000/transactions",
+    "postman:env": "node scripts/generate-postman-env.mjs"
   },
   "keywords": [],
-  "author": "João Vitor Camargo",
+  "author": "Jo\u00e3o Vitor Camargo",
   "license": "ISC",
   "type": "commonjs",
   "engines": {

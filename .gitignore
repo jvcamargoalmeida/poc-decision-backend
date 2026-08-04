@@ -6,3 +6,6 @@ coverage/
 npm-debug.log*
 .DS_Store
 .claude/settings.local.json
+
+# Postman environment gerado a partir do .env (contem segredo)
+poc_decision_backend.postman_environment.json

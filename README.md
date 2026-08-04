@@ -60,6 +60,7 @@ O servidor sobe em `http://localhost:3000`; `GET /health` retorna o status da ap
 | `npm run test:watch`    | Executa os testes em modo watch                            |
 | `npm run test:coverage` | Executa os testes com relatório de cobertura               |
 | `npm run test:load`     | Teste de carga com Autocannon (ver [`LOAD-TEST.md`](LOAD-TEST.md)) |
+| `npm run postman:env`   | Gera o Postman Environment a partir do `.env`               |
 
 ## 🗂️ Estrutura do projeto
 
@@ -100,6 +101,20 @@ Veja [`.env.example`](.env.example) para a lista completa (Oracle, MongoDB, Rabb
 A rota de callback (`PATCH /callback/transactions`) é protegida por *bearer token* — sem credencial válida responde `401`. O segredo vem de `CALLBACK_AUTH_TOKEN` e é comparado em tempo constante (`crypto.timingSafeEqual` sobre o hash SHA-256 dos valores, para não vazar informação por timing nem pelo comprimento do token). Não há dependência externa: só o `crypto` nativo do Node.
 
 O n8n envia esse header através de uma credencial *Bearer Auth*. Credenciais não são versionadas junto com o workflow (o segredo não entra no git) — em vez disso, o `docker-compose.yml` materializa a credencial no boot a partir de um template com placeholder, injetando o valor do `.env` (ver [`n8n-workflows/README.md`](n8n-workflows/README.md)).
+
+## 📮 Postman
+
+A collection versionada é [`poc_decision_backend.postman_collection.json`](poc_decision_backend.postman_collection.json), com exemplos de resposta reais e scripts de teste (roda também via `newman`).
+
+Ela referencia `{{url}}`, `{{n8n}}` e `{{bearerToken}}`, mas **não** carrega o segredo. Como o Postman não lê o filesystem (nem ao importar, nem em pre-request script — o sandbox não expõe `fs`), o caminho é gerar um *Environment* a partir do seu `.env`:
+
+```bash
+npm run postman:env   # gera poc_decision_backend.postman_environment.json
+```
+
+No Postman: **Import** os dois arquivos e selecione o environment no canto superior direito. O arquivo gerado contém o token e está no `.gitignore` — não deve ser commitado.
+
+O `transactionId` não vem do `.env`: é estado de runtime, gravado pelo request *Create Transaction* e consumido pelo *Callback*, encadeando os dois automaticamente.
 
 ## 📚 Documentação
 
