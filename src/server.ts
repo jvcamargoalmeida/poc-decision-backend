@@ -39,8 +39,15 @@ async function bootstrap(): Promise<void> {
       throw new Error('N8N_WEBHOOK_URL is not defined');
     }
 
+    const deadLetterExchange = `${transactionsQueue}.dlx`;
+    const deadLetterQueue = `${transactionsQueue}.dead`;
+
+    await rabbitChannel.assertExchange(deadLetterExchange, 'fanout', { durable: true });
+    await rabbitChannel.assertQueue(deadLetterQueue, { durable: true });
+    await rabbitChannel.bindQueue(deadLetterQueue, deadLetterExchange, '');
+
     await rabbitChannel.assertExchange('amq.topic', 'topic', { durable: true });
-    await rabbitChannel.assertQueue(transactionsQueue);
+    await rabbitChannel.assertQueue(transactionsQueue, { durable: true, deadLetterExchange });
     await rabbitChannel.bindQueue(transactionsQueue, 'amq.topic', 'transaction.created');
     const decisionGateway = new N8nWebhookClient(n8nWebhookUrl);
     transactionWorker = new TransactionWorker(rabbitChannel, transactionsQueue, decisionGateway);
