@@ -4,10 +4,20 @@ import type { Channel } from 'amqplib';
 import type { Connection } from 'mongoose';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerRoutes } from '@/presentation/routes';
+import { createBearerAuthHook } from '@/presentation/middlewares/bearer-auth';
+import { errorHandler } from '@/presentation/middlewares/error-handler';
+
+vi.mock('@/infrastructure/logger/winston.logger', () => ({
+  logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+}));
 
 const fakePool = {} as Pool;
 const fakeChannel = {} as Channel;
 const fakeMongoConnection = { model: vi.fn().mockReturnValue(vi.fn()) } as unknown as Connection;
+
+const CALLBACK_TOKEN = 'token-de-teste';
+const authHook = createBearerAuthHook(CALLBACK_TOKEN);
+const authHeaders = { authorization: `Bearer ${CALLBACK_TOKEN}` };
 
 describe('registerRoutes', () => {
   let app: ReturnType<typeof Fastify>;
@@ -18,7 +28,7 @@ describe('registerRoutes', () => {
 
   it('registers the health endpoint on the Fastify instance', async () => {
     app = Fastify();
-    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection);
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
 
     const response = await app.inject({ method: 'GET', url: '/health' });
 
@@ -28,7 +38,7 @@ describe('registerRoutes', () => {
 
   it('registers the transactions endpoint on the Fastify instance', async () => {
     app = Fastify();
-    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection);
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
 
     const response = await app.inject({ method: 'POST', url: '/transactions', payload: {} });
 
@@ -37,7 +47,7 @@ describe('registerRoutes', () => {
 
   it('rejeita campos desconhecidos no payload quando removeAdditional está desabilitado (config de produção)', async () => {
     app = Fastify({ ajv: { customOptions: { removeAdditional: false } } });
-    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection);
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
 
     const response = await app.inject({
       method: 'POST',
@@ -46,5 +56,71 @@ describe('registerRoutes', () => {
     });
 
     expect(response.statusCode).toBe(400);
+  });
+
+  it('registers the callback endpoint on the Fastify instance', async () => {
+    app = Fastify();
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/callback/transactions',
+      headers: authHeaders,
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('rejeita status fora do enum TransactionStatus no callback', async () => {
+    app = Fastify();
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/callback/transactions',
+      headers: authHeaders,
+      payload: { id: 'tx-id', status: 'algumacoisa_invalida' },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('responde 401 no callback quando não há credencial', async () => {
+    app = Fastify();
+    app.setErrorHandler(errorHandler);
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/callback/transactions',
+      payload: { id: 'tx-id', status: 'COMPLETED' },
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('responde 401 no callback quando a credencial está errada', async () => {
+    app = Fastify();
+    app.setErrorHandler(errorHandler);
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/callback/transactions',
+      headers: { authorization: 'Bearer token-errado' },
+      payload: { id: 'tx-id', status: 'COMPLETED' },
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('não exige credencial na rota de transações (auth aplicada só ao callback)', async () => {
+    app = Fastify();
+    await registerRoutes(app, fakePool, fakeChannel, fakeMongoConnection, authHook);
+
+    const response = await app.inject({ method: 'POST', url: '/transactions', payload: {} });
+
+    expect(response.statusCode).not.toBe(401);
   });
 });
