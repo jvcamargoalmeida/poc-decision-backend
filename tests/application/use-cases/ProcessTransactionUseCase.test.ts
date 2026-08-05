@@ -62,8 +62,29 @@ describe('ProcessTransactionUseCase', () => {
       }),
     );
     expect(mqPublisher.publish).toHaveBeenCalledWith('transaction.created', savedTransaction);
-    expect(auditRepository.logTransaction).toHaveBeenCalledWith('generated-id', savedTransaction);
+    expect(auditRepository.logTransaction).toHaveBeenCalledWith('generated-id', savedTransaction, undefined);
     expect(result).toEqual(savedTransaction);
+  });
+
+  it('grava o cliente que originou a requisição no audit log', async () => {
+    const { transactionRepository, riskStrategy, mqPublisher, auditRepository } = createDeps();
+    vi.mocked(riskStrategy.calculateRisk).mockReturnValue(RiskLevel.LOW);
+    const savedTransaction: Transaction = {
+      id: 'generated-id',
+      amount: 100,
+      currency: 'BRL',
+      status: TransactionStatus.PENDING,
+      riskScore: RiskLevel.LOW,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+    vi.mocked(transactionRepository.save).mockResolvedValue(savedTransaction);
+    vi.mocked(mqPublisher.publish).mockResolvedValue(undefined);
+    vi.mocked(auditRepository.logTransaction).mockResolvedValue(undefined);
+
+    const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
+    await useCase.execute(100, 'BRL', undefined, 'parceiro-a');
+
+    expect(auditRepository.logTransaction).toHaveBeenCalledWith('generated-id', savedTransaction, 'parceiro-a');
   });
 
   it('propaga o erro quando o repositório falha ao salvar, sem publicar evento nem gravar audit log', async () => {

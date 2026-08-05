@@ -2,6 +2,7 @@ import type { Channel, ConsumeMessage } from 'amqplib';
 import { TransactionStatus } from '@/domain/enums/TransactionStatus';
 import { TransactionNotFoundError } from '@/domain/errors/TransactionNotFoundError';
 import { UpdateTransactionStatusUseCase } from '@/application/use-cases/UpdateTransactionStatusUseCase';
+import { NonRetryableError, RetryScheduler } from '@/infrastructure/messaging/rabbitmq/retry';
 import { logger } from '@/infrastructure/logger/winston.logger';
 
 class DecisionResultWorker {
@@ -11,6 +12,7 @@ class DecisionResultWorker {
     private readonly channel: Channel,
     private readonly queue: string,
     private readonly updateTransactionStatusUseCase: UpdateTransactionStatusUseCase,
+    private readonly retryScheduler?: RetryScheduler,
   ) { }
 
   async start(): Promise<void> {
@@ -45,24 +47,53 @@ class DecisionResultWorker {
         transactionId: decisao.id, status: decisao.status,
       });
     } catch (error) {
-      logger.error('Erro ao aplicar decisão vinda da fila', {
-        error: (error as Error).message,
-        naoRecuperavel: error instanceof TransactionNotFoundError,
-      });
-      this.channel.nack(message, false, false);
+      this.rejeitar(message, error as Error);
     }
   }
 
+  /**
+   * Decide entre reagendar e descartar.
+   *
+   * Contrato violado e transação inexistente são definitivos: tentar de novo daria
+   * exatamente o mesmo resultado, então vão direto para a fila morta. Só falha de
+   * infraestrutura — Oracle fora do ar, por exemplo — ganha nova tentativa.
+   */
+  private rejeitar(message: ConsumeMessage, error: Error): void {
+    const definitivo = error instanceof NonRetryableError || error instanceof TransactionNotFoundError;
+    const tentativa = definitivo ? null : this.retryScheduler?.schedule(message) ?? null;
+
+    if (tentativa === null) {
+      logger.error('Decisão descartada para a fila morta', {
+        error: error.message,
+        motivo: definitivo ? 'erro definitivo' : 'tentativas esgotadas',
+      });
+      this.channel.nack(message, false, false);
+      return;
+    }
+
+    logger.warn('Decisão reagendada após falha transitória', {
+      error: error.message,
+      tentativa,
+      atrasoMs: this.retryScheduler?.delayOf(tentativa),
+    });
+    this.channel.ack(message);
+  }
+
   private parseDecisao(conteudo: string): { id: string; status: TransactionStatus } {
-    const payload = JSON.parse(conteudo) as { id?: unknown; status?: unknown };
+    let payload: { id?: unknown; status?: unknown };
+    try {
+      payload = JSON.parse(conteudo) as { id?: unknown; status?: unknown };
+    } catch {
+      throw new NonRetryableError('Decisão com JSON malformado');
+    }
 
     if (typeof payload.id !== 'string' || payload.id.length === 0) {
-      throw new Error('Decisão sem `id` válido');
+      throw new NonRetryableError('Decisão sem `id` válido');
     }
 
     const statusValidos = Object.values(TransactionStatus) as string[];
     if (typeof payload.status !== 'string' || !statusValidos.includes(payload.status)) {
-      throw new Error(`Status inválido na decisão: ${String(payload.status)}`);
+      throw new NonRetryableError(`Status inválido na decisão: ${String(payload.status)}`);
     }
 
     return { id: payload.id, status: payload.status as TransactionStatus };

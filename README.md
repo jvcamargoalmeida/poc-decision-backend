@@ -13,7 +13,7 @@ A arquitetura dispensa o uso de ORMs pesados em favor de drivers nativos e padr�
 * **Persistência Híbrida e Distribuída:** 
   * **Oracle DB (SQL Nativo):** Armazenamento de dados transacionais e resultados estruturados.
   * **MongoDB:** Armazenamento flexível para logs de auditoria e *payloads* brutos.
-* **Mensageria e Assincronicidade:** Desacoplamento de processos utilizando filas no **RabbitMQ** para ingestão e processamento de dados, com *dead-letter queue* em todas as filas.
+* **Mensageria e Assincronicidade:** Desacoplamento de processos utilizando filas no **RabbitMQ** para ingestão e processamento de dados, com *retry* em *backoff* escalonado (agendado pelo próprio broker via TTL) e *dead-letter queue* em todas as filas.
 * **Integração NoCode:** Orquestração de cálculos e algoritmos estatísticos externos com o **n8n**, por dois transportes alternáveis — Webhook (*push*) ou consumo direto da fila pelo próprio n8n (*pull*, com *backpressure* natural).
 * **Idempotência:** Header `Idempotency-Key` do cliente, com unicidade garantida pelo banco e recuperação de corrida entre requisições concorrentes.
 * **Observabilidade (APM Ready):** Geração de logs estruturados em padrão estrito JSON através do **Winston**, prontos para ingestão em stacks de monitoramento como Datadog ou Elastic (ELK).
@@ -117,8 +117,13 @@ As duas rotas de negócio exigem *bearer token* — sem credencial válida respo
 
 | Rota | Credencial |
 | --- | --- |
-| `POST /transactions` | `API_AUTH_TOKEN` (clientes da API) |
+| `POST /transactions` | `API_CLIENTS` (credencial por cliente) ou `API_AUTH_TOKEN` |
 | `PATCH /callback/transactions` | `CALLBACK_AUTH_TOKEN` (n8n) |
+
+`API_CLIENTS` aceita pares `id:token,id:token`. Com ela, o hook resolve **qual** cliente chamou e o
+audit log passa a registrar `clientId` — a trilha responde *quem* pediu, não só *o que* aconteceu —,
+e revogar um cliente não derruba os outros. Sem ela, o `API_AUTH_TOKEN` vale como cliente único
+`default`: autentica igual, só sem atribuição de identidade.
 
 Os segredos são separados de propósito: cliente e n8n são atores distintos, então o vazamento de um não concede acesso ao outro. Ambos são comparados em tempo constante (`crypto.timingSafeEqual` sobre o hash SHA-256, para não vazar informação por timing nem pelo comprimento do token). Não há dependência externa: só o `crypto` nativo do Node.
 

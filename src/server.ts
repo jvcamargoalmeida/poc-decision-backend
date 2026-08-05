@@ -8,9 +8,10 @@ import { connectMongo, disconnectMongo } from '@/infrastructure/database/mongo/m
 import { connectRabbitMQ, closeRabbitMQ } from '@/infrastructure/messaging/rabbitmq/rabbitmq.connection';
 import { TransactionWorker } from '@/infrastructure/messaging/rabbitmq/workers/TransactionWorker';
 import { DecisionResultWorker } from '@/infrastructure/messaging/rabbitmq/workers/DecisionResultWorker';
+import { RetryScheduler, assertRetryTopology, parseRetryDelays } from '@/infrastructure/messaging/rabbitmq/retry';
 import { buildUpdateTransactionStatusUseCase } from '@/presentation/container';
 import { N8nWebhookClient } from './infrastructure/external/n8n/N8nWebhookClient';
-import { createBearerAuthHook } from '@/presentation/middlewares/bearer-auth';
+import { createBearerAuthHook, createClientAuthHook, parseApiClients } from '@/presentation/middlewares/bearer-auth';
 import { createRateLimitHook } from '@/presentation/middlewares/rate-limit';
 import { registerGracefulShutdown } from '@/infrastructure/lifecycle/graceful-shutdown';
 
@@ -39,6 +40,7 @@ async function bootstrap(): Promise<void> {
 
   if (transactionsQueue) {
     const decisionTransport = process.env.DECISION_TRANSPORT === 'queue' ? 'queue' : 'http';
+    const retryDelays = parseRetryDelays(process.env.RETRY_DELAYS_MS);
 
     const deadLetterExchange = `${transactionsQueue}.dlx`;
     const deadLetterQueue = `${transactionsQueue}.dead`;
@@ -91,13 +93,21 @@ async function bootstrap(): Promise<void> {
       }
 
       const decisionGateway = new N8nWebhookClient(n8nWebhookUrl, n8nWebhookToken);
-      transactionWorker = new TransactionWorker(rabbitChannel, transactionsQueue, decisionGateway);
+      await assertRetryTopology(rabbitChannel, transactionsQueue, retryDelays);
+      transactionWorker = new TransactionWorker(
+        rabbitChannel,
+        transactionsQueue,
+        decisionGateway,
+        new RetryScheduler(rabbitChannel, transactionsQueue, retryDelays),
+      );
       await transactionWorker.start();
     } else {
+      await assertRetryTopology(rabbitChannel, decisionResultsQueue, retryDelays);
       decisionResultWorker = new DecisionResultWorker(
         rabbitChannel,
         decisionResultsQueue,
         buildUpdateTransactionStatusUseCase(oraclePool),
+        new RetryScheduler(rabbitChannel, decisionResultsQueue, retryDelays),
       );
       await decisionResultWorker.start();
     }
@@ -118,13 +128,19 @@ async function bootstrap(): Promise<void> {
     windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
   });
 
+  const apiClients = parseApiClients(process.env.API_CLIENTS, apiAuthToken);
+  logger.info('Credenciais de ingestão carregadas', {
+    clientes: apiClients.map((cliente) => cliente.id),
+    identidadeAtribuida: apiClients.some((cliente) => cliente.id !== 'default'),
+  });
+
   await registerRoutes(
     app,
     oraclePool,
     rabbitChannel,
     mongoClient.connection,
     createBearerAuthHook(callbackAuthToken),
-    createBearerAuthHook(apiAuthToken),
+    createClientAuthHook(apiClients),
     rateLimitHook,
   );
 

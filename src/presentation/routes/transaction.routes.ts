@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { TransactionController, type CreateTransactionBody } from '@/presentation/controllers/TransactionController';
-import type { BearerAuthHook } from '@/presentation/middlewares/bearer-auth';
+import type { ClientAuthHook } from '@/presentation/middlewares/bearer-auth';
 import type { RateLimitHook } from '@/presentation/middlewares/rate-limit';
 
 const createTransactionSchema = {
@@ -24,7 +24,7 @@ const createTransactionSchema = {
 export async function registerTransactionRoutes(
   app: FastifyInstance,
   controller: TransactionController,
-  authHook: BearerAuthHook,
+  authHook: ClientAuthHook,
   rateLimitHook: RateLimitHook,
 ): Promise<void> {
   app.post<{ Body: CreateTransactionBody }>(

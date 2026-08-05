@@ -386,6 +386,42 @@ mensagens de antes do vínculo condicional precisa ser esvaziada uma vez
 (`rabbitmqctl purge_queue`), senão o worker do modo de destino drena histórico já decidido. Ver
 [`ROADMAP.md`](ROADMAP.md).
 
+### 3.4 Retry com backoff antes do descarte
+
+Uma falha não vira descarte na primeira tentativa. Entre o worker e a fila morta existem filas de
+espera — uma por nível de atraso — onde a mensagem fica parada até o broker devolvê-la sozinha.
+
+```mermaid
+flowchart LR
+    Q[[fila de origem]] --> W[worker]
+    W -->|sucesso| OK([ack])
+    W -->|"falha transitória<br/>(n8n 503, Oracle fora)"| R1[[retry.1 · TTL 5s]]
+    R1 -.TTL expira.-> Q
+    W -->|"2ª falha"| R2[[retry.2 · TTL 30s]]
+    R2 -.TTL expira.-> Q
+    W -->|"3ª falha"| R3[[retry.3 · TTL 120s]]
+    R3 -.TTL expira.-> Q
+    W -->|"erro definitivo<br/>ou tentativas esgotadas"| DLQ[[dead-letter queue]]
+```
+
+Quatro decisões que sustentam esse desenho:
+
+- **Quem agenda é o RabbitMQ, não a aplicação.** A fila de espera não tem consumidor: a mensagem
+  vence por `x-message-ttl` e o broker a encaminha adiante. Um `setTimeout` no processo evaporaria
+  junto com ele numa queda; a mensagem na fila sobrevive.
+- **Uma fila por nível, não uma fila só com TTL por mensagem.** A expiração é avaliada na cabeça da
+  fila, então uma mensagem de 120s na frente seguraria as de 5s atrás dela.
+- **O retorno é pela exchange padrão** (`''`) com routing key igual ao nome da fila de origem — e
+  **não** pela `amq.topic`. Voltar pela topic reentregaria a mensagem a toda fila ligada àquela
+  routing key, não só à que falhou.
+- **Nem toda falha merece nova tentativa.** JSON malformado, contrato violado e transação
+  inexistente são `NonRetryableError` e vão direto para a fila morta: repetir gastaria o orçamento
+  para chegar no mesmo lugar. Só falha de infraestrutura é reagendada.
+
+O custo assumido é *at-least-once*: o worker republica a mensagem e só então confirma a original,
+então uma queda exatamente nessa janela duplica a mensagem. Duplicar é preferível a perder — e é o
+mesmo motivo pelo qual a ingestão aceita `Idempotency-Key`.
+
 ## 4. Modelo de Dados (DER)
 
 A persistência é híbrida e **não** há chave estrangeira entre os dois bancos — o vínculo é lógico,
@@ -409,6 +445,7 @@ erDiagram
         ObjectId _id PK
         String transactionId UK "required, unique, index"
         Mixed payload "required"
+        String clientId "opcional, index — quem originou"
         Date createdAt "default now"
     }
 ```
@@ -439,6 +476,9 @@ Dois pontos que valem atenção nesse modelo:
   múltiplos `NULL`s, então a chave continua opcional e as linhas antigas seguem válidas. É o banco
   — não a verificação prévia na aplicação — que resolve duas requisições concorrentes com a mesma
   chave; a aplicação só recupera a vencedora depois do `ORA-00001`.
+- **`clientId` é indexado e opcional**: é o campo que responde "o que este cliente submeteu?", e a
+  trilha só passa a ter essa resposta quando `API_CLIENTS` define credencial por cliente. Documentos
+  gravados antes disso continuam válidos sem ele — daí ser opcional em vez de obrigatório.
 
 ---
 

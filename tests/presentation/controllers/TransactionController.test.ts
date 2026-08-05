@@ -36,7 +36,7 @@ describe('TransactionController', () => {
 
     await controller.create(request, reply);
 
-    expect(processTransactionUseCase.execute).toHaveBeenCalledWith(100, 'BRL', undefined);
+    expect(processTransactionUseCase.execute).toHaveBeenCalledWith(100, 'BRL', undefined, undefined);
     expect(reply.status).toHaveBeenCalledWith(201);
     expect(reply.send).toHaveBeenCalledWith(savedTransaction);
   });
@@ -67,7 +67,7 @@ describe('TransactionController', () => {
 
     await controller.create(request, createFakeReply());
 
-    expect(processTransactionUseCase.execute).toHaveBeenCalledWith(100, 'BRL', 'chave-abc');
+    expect(processTransactionUseCase.execute).toHaveBeenCalledWith(100, 'BRL', 'chave-abc', undefined);
   });
 
   it('passa undefined quando o cliente não envia a chave', async () => {
@@ -80,6 +80,23 @@ describe('TransactionController', () => {
 
     await controller.create(request, createFakeReply());
 
-    expect(processTransactionUseCase.execute).toHaveBeenCalledWith(100, 'BRL', undefined);
+    expect(processTransactionUseCase.execute).toHaveBeenCalledWith(100, 'BRL', undefined, undefined);
+  });
+
+  it('repassa a identidade do cliente resolvida pelo hook de autenticação', async () => {
+    const processTransactionUseCase = {
+      execute: vi.fn().mockResolvedValue({} as Transaction),
+    } as unknown as ProcessTransactionUseCase;
+
+    const controller = new TransactionController(processTransactionUseCase);
+    const request = {
+      body: { amount: 100, currency: 'BRL' },
+      headers: {},
+      clientId: 'parceiro-a',
+    } as unknown as CreateTransactionRequest;
+
+    await controller.create(request, createFakeReply());
+
+    expect(processTransactionUseCase.execute).toHaveBeenCalledWith(100, 'BRL', undefined, 'parceiro-a');
   });
 });

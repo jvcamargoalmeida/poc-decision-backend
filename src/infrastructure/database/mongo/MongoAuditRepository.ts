@@ -5,10 +5,11 @@ import { Model } from 'mongoose';
 class MongoAuditRepository implements IAuditRepository {
   constructor(private readonly auditLogModel: Model<AuditLogDocument>) {}
 
-  async logTransaction(transactionId: string, payload: unknown): Promise<void> {
+  async logTransaction(transactionId: string, payload: unknown, clientId?: string): Promise<void> {
     const auditLog = new this.auditLogModel({
       transactionId,
       payload,
+      clientId,
       createdAt: new Date(),
     });
 

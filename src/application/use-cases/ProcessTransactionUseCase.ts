@@ -15,7 +15,12 @@ class ProcessTransactionUseCase {
     private readonly auditRepository: IAuditRepository,
   ) { }
 
-  async execute(amount: number, currency: string, idempotencyKey?: string): Promise<Transaction> {
+  async execute(
+    amount: number,
+    currency: string,
+    idempotencyKey?: string,
+    clientId?: string,
+  ): Promise<Transaction> {
     if (idempotencyKey) {
       const jaProcessada = await this.transactionRepository.findByIdempotencyKey(idempotencyKey);
       if (jaProcessada) {
@@ -55,11 +60,13 @@ class ProcessTransactionUseCase {
 
     if (!savedTransaction.id) throw new Error('Erro ao salvar transação: ID não gerado');
 
-    logger.info('Transação persistida', { transactionId: savedTransaction.id, amount, currency, riskScore });
+    logger.info('Transação persistida', {
+      transactionId: savedTransaction.id, amount, currency, riskScore, clientId,
+    });
 
     const [eventoOk, auditoriaOk] = await Promise.allSettled([
       this.mQPublisher.publish('transaction.created', savedTransaction),
-      this.auditRepository.logTransaction(savedTransaction.id, savedTransaction),
+      this.auditRepository.logTransaction(savedTransaction.id, savedTransaction, clientId),
     ]);
 
     if (eventoOk.status === 'rejected') {

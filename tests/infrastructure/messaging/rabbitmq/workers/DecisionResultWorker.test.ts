@@ -4,6 +4,7 @@ import { DecisionResultWorker } from '@/infrastructure/messaging/rabbitmq/worker
 import { UpdateTransactionStatusUseCase } from '@/application/use-cases/UpdateTransactionStatusUseCase';
 import { TransactionNotFoundError } from '@/domain/errors/TransactionNotFoundError';
 import { TransactionStatus } from '@/domain/enums/TransactionStatus';
+import type { RetryScheduler } from '@/infrastructure/messaging/rabbitmq/retry';
 
 vi.mock('@/infrastructure/logger/winston.logger', () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
@@ -141,5 +142,72 @@ describe('DecisionResultWorker', () => {
     await worker.stop();
 
     expect(channel.cancel).not.toHaveBeenCalled();
+  });
+
+  describe('retry com backoff', () => {
+    function createScheduler(tentativa: number | null) {
+      return {
+        schedule: vi.fn().mockReturnValue(tentativa),
+        delayOf: vi.fn().mockReturnValue(5_000),
+      } as unknown as RetryScheduler;
+    }
+
+    it('reagenda falha transitória e confirma a original — a cópia agendada assume o lugar', async () => {
+      const { channel, getCallback } = createFakeChannel();
+      const useCase = createUseCase();
+      vi.mocked(useCase.execute).mockRejectedValue(new Error('Oracle fora do ar'));
+      const scheduler = createScheduler(1);
+      const worker = new DecisionResultWorker(channel, FILA, useCase, scheduler);
+      await worker.start();
+
+      const mensagem = msg({ id: 'tx-1', status: 'COMPLETED' });
+      await getCallback()?.(mensagem);
+
+      expect(scheduler.schedule).toHaveBeenCalledWith(mensagem);
+      expect(channel.ack).toHaveBeenCalledWith(mensagem);
+      expect(channel.nack).not.toHaveBeenCalled();
+    });
+
+    it('descarta para a fila morta quando as tentativas se esgotam', async () => {
+      const { channel, getCallback } = createFakeChannel();
+      const useCase = createUseCase();
+      vi.mocked(useCase.execute).mockRejectedValue(new Error('Oracle fora do ar'));
+      const worker = new DecisionResultWorker(channel, FILA, useCase, createScheduler(null));
+      await worker.start();
+
+      const mensagem = msg({ id: 'tx-1', status: 'COMPLETED' });
+      await getCallback()?.(mensagem);
+
+      expect(channel.nack).toHaveBeenCalledWith(mensagem, false, false);
+      expect(channel.ack).not.toHaveBeenCalled();
+    });
+
+    it('não gasta tentativa com erro definitivo — retry daria o mesmo resultado', async () => {
+      const { channel, getCallback } = createFakeChannel();
+      const useCase = createUseCase();
+      vi.mocked(useCase.execute).mockRejectedValue(new TransactionNotFoundError('tx-sumiu'));
+      const scheduler = createScheduler(1);
+      const worker = new DecisionResultWorker(channel, FILA, useCase, scheduler);
+      await worker.start();
+
+      const mensagem = msg({ id: 'tx-sumiu', status: 'COMPLETED' });
+      await getCallback()?.(mensagem);
+
+      expect(scheduler.schedule).not.toHaveBeenCalled();
+      expect(channel.nack).toHaveBeenCalledWith(mensagem, false, false);
+    });
+
+    it('não gasta tentativa com payload inválido', async () => {
+      const { channel, getCallback } = createFakeChannel();
+      const scheduler = createScheduler(1);
+      const worker = new DecisionResultWorker(channel, FILA, createUseCase(), scheduler);
+      await worker.start();
+
+      const mensagem = msg('nao e json');
+      await getCallback()?.(mensagem);
+
+      expect(scheduler.schedule).not.toHaveBeenCalled();
+      expect(channel.nack).toHaveBeenCalledWith(mensagem, false, false);
+    });
   });
 });

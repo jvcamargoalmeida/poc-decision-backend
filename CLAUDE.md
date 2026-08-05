@@ -58,6 +58,8 @@ As restrições acima são o padrão. O engenheiro responsável pode suspendê-l
 | --- | --- | --- |
 | Implementação completa da idempotência (`ProcessTransactionUseCase`, `OracleTransactionRepository.findByIdempotencyKey`, `DuplicateIdempotencyKeyError`, DDL do índice único) | a pedido explícito do engenheiro, durante a resolução dos gaps de débito técnico | tratamento de corrida em nível de banco, com trade-offs que valiam ser demonstrados por inteiro em vez de esqueleto |
 | Implementação completa do `DecisionResultWorker` (parse, revalidação de contrato e roteamento da mensagem) | Fase 10 | é o par simétrico do `CallbackController`, que já existia; a lógica de decisão em si continua no n8n, não no worker |
+| Retry com *backoff* (`retry.ts` e a classificação de falha no branch de erro dos dois workers) | fechamento dos gaps em aberto | é resiliência de infraestrutura e topologia de broker — escopo já aprovado —, e não toca regra de negócio: o worker continua sem decidir nada sobre a transação, só sobre a entrega da mensagem |
+| Credencial por cliente e propagação do `clientId` até o audit log | fechamento dos gaps em aberto | *middleware* de apresentação e campo de auditoria; a mudança na assinatura de `IAuditRepository` é encanamento, não invariante de domínio |
 
 Fora destas linhas, a restrição segue valendo integralmente.
 

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Channel, ConsumeMessage } from 'amqplib';
 import { TransactionWorker } from '@/infrastructure/messaging/rabbitmq/workers/TransactionWorker';
 import type { IDecisionGateway } from '@/domain/services/IDecisionGateway';
+import type { RetryScheduler } from '@/infrastructure/messaging/rabbitmq/retry';
 
 vi.mock('@/infrastructure/logger/winston.logger', () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
@@ -132,5 +133,70 @@ describe('TransactionWorker', () => {
     await worker.stop();
 
     expect(channel.cancel).not.toHaveBeenCalled();
+  });
+
+  describe('retry com backoff', () => {
+    function createScheduler(tentativa: number | null) {
+      return {
+        schedule: vi.fn().mockReturnValue(tentativa),
+        delayOf: vi.fn().mockReturnValue(5_000),
+      } as unknown as RetryScheduler;
+    }
+
+    it('reagenda quando o n8n falha — era exatamente o 503 que descartava mensagem sob carga', async () => {
+      const { channel, getCallback } = createFakeChannel();
+      const decisionGateway = createFakeDecisionGateway();
+      vi.mocked(decisionGateway.requestDecision).mockRejectedValue(new Error('n8n respondeu 503'));
+      const scheduler = createScheduler(1);
+      const worker = new TransactionWorker(channel, 'transactions.queue', decisionGateway, scheduler);
+      await worker.start();
+
+      const mensagem = createMessage({ id: 'tx-1' });
+      await getCallback()?.(mensagem);
+
+      expect(scheduler.schedule).toHaveBeenCalledWith(mensagem);
+      expect(channel.ack).toHaveBeenCalledWith(mensagem);
+      expect(channel.nack).not.toHaveBeenCalled();
+    });
+
+    it('descarta para a fila morta quando as tentativas se esgotam', async () => {
+      const { channel, getCallback } = createFakeChannel();
+      const decisionGateway = createFakeDecisionGateway();
+      vi.mocked(decisionGateway.requestDecision).mockRejectedValue(new Error('n8n respondeu 503'));
+      const worker = new TransactionWorker(channel, 'transactions.queue', decisionGateway, createScheduler(null));
+      await worker.start();
+
+      const mensagem = createMessage({ id: 'tx-1' });
+      await getCallback()?.(mensagem);
+
+      expect(channel.nack).toHaveBeenCalledWith(mensagem, false, false);
+      expect(channel.ack).not.toHaveBeenCalled();
+    });
+
+    it('não gasta tentativa com JSON malformado — mensagem envenenada vai direto para a fila morta', async () => {
+      const { channel, getCallback } = createFakeChannel();
+      const scheduler = createScheduler(1);
+      const worker = new TransactionWorker(channel, 'transactions.queue', createFakeDecisionGateway(), scheduler);
+      await worker.start();
+
+      const mensagem = { content: Buffer.from('nao e json') } as ConsumeMessage;
+      await getCallback()?.(mensagem);
+
+      expect(scheduler.schedule).not.toHaveBeenCalled();
+      expect(channel.nack).toHaveBeenCalledWith(mensagem, false, false);
+    });
+
+    it('sem scheduler configurado mantém o comportamento anterior de descarte direto', async () => {
+      const { channel, getCallback } = createFakeChannel();
+      const decisionGateway = createFakeDecisionGateway();
+      vi.mocked(decisionGateway.requestDecision).mockRejectedValue(new Error('n8n fora do ar'));
+      const worker = new TransactionWorker(channel, 'transactions.queue', decisionGateway);
+      await worker.start();
+
+      const mensagem = createMessage({ id: 'tx-1' });
+      await getCallback()?.(mensagem);
+
+      expect(channel.nack).toHaveBeenCalledWith(mensagem, false, false);
+    });
   });
 });
