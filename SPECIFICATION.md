@@ -13,6 +13,8 @@ Este documento descreve as capacidades do sistema, suas restrições arquitetura
 - **RF06 - Enfileiramento de Eventos:** O sistema deve publicar um evento de "Transação Criada" em um *message broker* (RabbitMQ) para processamento assíncrono.
 - **RF07 - Integração de Decisão Externa:** O sistema deve consumir a fila de eventos e enviar os dados para um orquestrador externo (n8n) via Webhook.
 - **RF08 - Atualização de Status (Callback):** O sistema deve possuir uma rota de *callback* para receber a decisão final do orquestrador externo e atualizar o status da transação no Oracle.
+- **RF09 - Idempotência de Ingestão:** O sistema deve aceitar uma chave `Idempotency-Key` enviada pelo cliente e, quando a mesma chave for reapresentada, devolver a transação original em vez de criar uma nova — inclusive sob requisições concorrentes.
+- **RF10 - Transporte Alternativo da Decisão (Fila):** O sistema deve suportar, de forma alternável por configuração, um segundo transporte em que o orquestrador externo **consome** o pedido de decisão diretamente de uma fila e **publica** o resultado em outra fila, sem webhook e sem rota de callback no caminho.
 
 ## 2. Requisitos Não Funcionais (RNF)
 *Restrições, qualidade e características de engenharia do sistema.*
@@ -24,6 +26,9 @@ Este documento descreve as capacidades do sistema, suas restrições arquitetura
 - **RNF05 - Qualidade de Código:** O projeto deve manter uma cobertura de testes unitários mínima de 95% (Vitest), imposta via CI/CD em todo Pull Request.
 - **RNF06 - Autenticação de Callback:** A rota de callback, por alterar o estado final de uma transação, deve exigir credencial (*bearer token*) e rejeitar chamadas não autenticadas com `401`. A comparação do segredo deve ser feita em tempo constante para não vazar informação por *timing*.
 - **RNF07 - Encerramento Gracioso:** Ao receber `SIGTERM`/`SIGINT`, a aplicação deve parar de aceitar trabalho novo (HTTP e consumo da fila) e fechar as conexões de Oracle, MongoDB e RabbitMQ antes de encerrar o processo, com limite de tempo para não travar indefinidamente.
+- **RNF08 - Autenticação de Ingestão e Proteção contra Abuso:** `POST /transactions` deve exigir *bearer token* próprio, distinto do segredo do callback, e ambas as rotas de negócio devem estar sujeitas a limite de requisições por IP, respondendo `429` com `Retry-After`. O limite é contado **antes** da verificação de credencial, para que tentativas não autenticadas também consumam cota.
+- **RNF09 - *Backpressure* na Decisão Externa:** O sistema não deve submeter o orquestrador externo a mais carga do que ele sustenta. Quando o orquestrador for interno e capaz de consumir do broker, o transporte por fila deve ser preferido, para que o ritmo seja ditado pelo consumidor (*pull*) e não pelo produtor (*push*).
+- **RNF10 - Não Perda de Mensagem:** Toda fila deve declarar *dead-letter exchange*. Uma mensagem rejeitada — payload inválido, transação inexistente, falha do orquestrador — vai para a fila morta com o motivo preservado no header `x-death`, nunca é descartada silenciosamente.
 
 ---
 
@@ -31,8 +36,12 @@ Este documento descreve as capacidades do sistema, suas restrições arquitetura
 
 Abaixo está o ciclo de vida completo de uma transação, mapeando o comportamento às classes e arquivos específicos que você irá implementar.
 
+As Fases A e B são iguais nos dois transportes. As Fases C, D e E existem em duas variantes: a de
+webhook (`DECISION_TRANSPORT=http`, descrita em C/D/E) e a de fila
+(`DECISION_TRANSPORT=queue`, descrita em C′/D′/E′).
+
 ### Fase A: Recepção e Persistência Síncrona (A API Principal)
-1. **Recepção e Validação:** O cliente faz um POST em `/transactions`.
+1. **Recepção e Validação:** O cliente faz um POST em `/transactions`, autenticado por *bearer token* e opcionalmente com o header `Idempotency-Key`.
    - *Arquivos:* `src/presentation/routes/transaction.routes.ts` e `src/presentation/controllers/TransactionController.ts`
 2. **Orquestração Síncrona:** O Controller chama o Caso de Uso principal.
    - *Arquivo:* `src/application/use-cases/ProcessTransactionUseCase.ts`
@@ -69,6 +78,34 @@ Abaixo está o ciclo de vida completo de uma transação, mapeando o comportamen
 
 ---
 
+## 3.1 Variante: Decisão Mediada pela Fila (`DECISION_TRANSPORT=queue`)
+
+Nesta variante o broker media os **dois** sentidos: `poc → fila → n8n → fila → poc`. As Fases A e B
+são idênticas às acima — o `RabbitMQPublisher` publica `transaction.created` do mesmo jeito, sem
+saber qual transporte está ativo. O que muda é quem escuta.
+
+### Fase C′: O n8n Consome (em vez de ser chamado)
+1. **Consumo pelo Orquestrador:** o próprio n8n mantém um consumidor ativo na fila de pedidos `transactions.queue.decision.requests`, ligada a `amq.topic` pela routing key `transaction.created`. O `TransactionWorker` e o `N8nWebhookClient` **não são instanciados** neste modo.
+   - *Artefato:* `n8n-workflows/fraud-analysis-queue.json` (node *RabbitMQ Trigger*)
+   - *Arquivo:* topologia declarada em `src/server.ts`
+
+### Fase D′: Decisão e Publicação do Resultado
+1. **Processamento Visual:** mesmo `If` sobre `riskScore` do fluxo de webhook, lendo `$json.data.riskScore` — o envelope `{ eventName, timestamp, data }` chega igual pela fila.
+2. **Publicação da Decisão:** em vez de um `HTTP Request` para o callback, o n8n publica `{ id, status }` em `amq.topic` com a routing key `transaction.decided`.
+   - *Artefato:* `n8n-workflows/fraud-analysis-queue.json` (nodes *Publicar FAILED* / *Publicar COMPLETED*)
+
+### Fase E′: Aplicação da Decisão (sem HTTP)
+1. **Consumo do Resultado:** um worker dedicado consome `transactions.queue.decision.results`.
+   - *Arquivo:* `src/infrastructure/messaging/rabbitmq/workers/DecisionResultWorker.ts`
+2. **Revalidação de Contrato:** como não há JSON Schema do Fastify nesse caminho, o worker valida `id` e `status` contra `TransactionStatus` manualmente e faz `nack` sem requeue no que não passar (a mensagem vai para a *dead-letter queue*).
+3. **Orquestração e Atualização:** daí em diante o caminho é **o mesmo** do callback HTTP — mesmo caso de uso, mesmo repositório, montados pelo mesmo `buildUpdateTransactionStatusUseCase(pool)`.
+   - *Arquivos:* `src/application/use-cases/UpdateTransactionStatusUseCase.ts`, `src/infrastructure/database/oracle/OracleTransactionRepository.ts` e `src/presentation/container.ts`
+
+Trocar de transporte **não** duplica regra de negócio: muda apenas o adaptador de entrada. É a
+prova prática da inversão de dependência que o resto do documento descreve.
+
+---
+
 ## 4. Testes de Carga e Validação Arquitetural (Stress Test)
 
 O principal objetivo desta PoC é comprovar estabilidade sob alta volumetria. A validação não será feita por envios unitários (Postman/Insomnia), mas sim por injeção de carga massiva.
@@ -79,5 +116,26 @@ Utilizaremos o **Autocannon** (ferramenta baseada em Node.js desenvolvida pela m
 ### 4.2. Cenário de Teste
 O teste simulará um pico de requisições de Black Friday, bombardeando a Fase A do sistema.
 **Comando de Execução (Exemplo):**
+
 ```bash
-npx autocannon -c 100 -d 30 -m POST -H "Content-Type: application/json" -b '{"amount": 15000, "currency": "BRL"}' http://localhost:3000/transactions
+npx autocannon -c 100 -d 30 -m POST \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $API_AUTH_TOKEN" \
+  -b '{"amount": 15000, "currency": "BRL"}' \
+  http://localhost:3000/transactions
+```
+
+Encapsulado em `npm run test:load`, que lê o token do `.env`. Como o cenário dispara ~515 req/s de
+um único endereço, ele estoura qualquer limite de taxa realista — suba o servidor com
+`RATE_LIMIT_MAX` alto, senão o teste mede o limitador em vez da aplicação.
+
+### 4.3. Critérios de Aceite
+
+| Critério | Resultado medido |
+| --- | --- |
+| Nenhuma resposta não-2xx na ingestão | ✅ 0 erros em ~15,5 mil requisições |
+| Toda transação aceita gravada no Oracle | ✅ 15.562 linhas |
+| Nenhuma mensagem perdida na decisão externa | ❌ na época, 7.866 descartadas — motivou a DLQ e o *rate limiting* |
+
+O terceiro critério é o que justifica o RNF09 e o RNF10: a borda síncrona passou, o caminho
+assíncrono não. Resultados completos e análise em [`LOAD-TEST.md`](LOAD-TEST.md).

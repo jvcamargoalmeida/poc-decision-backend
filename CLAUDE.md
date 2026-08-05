@@ -11,7 +11,7 @@ Os requisitos funcionais/não funcionais (RF/RNF) e o mapeamento arquivo-a-arqui
 - **Persistência (Sem ORM/Vanilla):** 
   - Oracle DB (`oracledb` com controle manual de *Connection Pool*)
   - MongoDB (`mongoose` para coleções não estruturadas/logs)
-- **Automação de Fluxos:** n8n (Integração via HTTP/Webhooks)
+- **Automação de Fluxos:** n8n — dois transportes alternáveis por `DECISION_TRANSPORT`: HTTP/Webhooks (*push*) ou consumo direto da fila pelo próprio n8n (*pull*)
 - **Observabilidade:** Winston (Formatação estrita em JSON)
 - **Arquitetura:** Clean Architecture / Padrão Repository (SQL Nativo)
 
@@ -50,6 +50,17 @@ Restrições específicas incluem:
 
 *Nota: A lógica de negócios central, modelagem de banco de dados estruturada e invariantes de domínio são implementados manualmente pelo engenheiro responsável.*
 
+### 3. Exceções Concedidas Explicitamente
+
+As restrições acima são o padrão. O engenheiro responsável pode suspendê-las pontualmente, e nesse caso **a exceção fica registrada aqui** — o objetivo da regra é rastreabilidade de autoria, não cerimônia. Uma exceção vale só para o escopo declarado; não abre precedente para os itens seguintes.
+
+| Escopo | Concedida em | Motivo |
+| --- | --- | --- |
+| Implementação completa da idempotência (`ProcessTransactionUseCase`, `OracleTransactionRepository.findByIdempotencyKey`, `DuplicateIdempotencyKeyError`, DDL do índice único) | a pedido explícito do engenheiro, durante a resolução dos gaps de débito técnico | tratamento de corrida em nível de banco, com trade-offs que valiam ser demonstrados por inteiro em vez de esqueleto |
+| Implementação completa do `DecisionResultWorker` (parse, revalidação de contrato e roteamento da mensagem) | Fase 10 | é o par simétrico do `CallbackController`, que já existia; a lógica de decisão em si continua no n8n, não no worker |
+
+Fora destas linhas, a restrição segue valendo integralmente.
+
 ---
 
 ## 🚦 CI/CD e Cobertura de Testes
@@ -66,7 +77,8 @@ Todo Pull Request para a branch `main` **DEVE** manter cobertura mínima de **95
 
 ### Pipeline (GitHub Actions)
 Definido em `.github/workflows/ci.yml`, disparado em todo `pull_request` (aberta, sincronizada ou reaberta) contra `main` e em todo `push` para `main`:
-- **`quality`:** `npm run typecheck` (`tsconfig.json`, cobre `src/` + `tests/` — é o config que o editor também enxerga), `npm run build` (`tsconfig.build.json`, restrito a `src/` para o `dist/`), e um smoke test do `npm run dev` (sobe o `ts-node-dev`, faz polling em `/health` por até 15s).
+- **`quality`:** `npm run typecheck` (`tsconfig.json`, cobre `src/` + `tests/` — é o config que o editor também enxerga), `npm run build` (`tsconfig.build.json`, restrito a `src/` para o `dist/`), e um smoke test do `npm run dev` (sobe o `ts-node-dev`, faz polling em `/health` por até 15s) com Oracle, MongoDB e RabbitMQ como *service containers*.
+  - O smoke test faz `cp .env.example .env` em vez de duplicar variável por variável no workflow. Isso é deliberado: **toda variável nova adicionada ao `.env.example` passa a existir automaticamente no CI**. Antes, cada variável nova quebrava o job até alguém lembrar de replicá-la — aconteceu três vezes seguidas. O efeito colateral é que o smoke test roda no transporte que o `.env.example` declara (hoje, `queue`).
 - **`test`:** `npm run test:coverage`, publica um resumo de cobertura no Job Summary e como comentário atualizável na PR, e sobe o relatório completo (`coverage/`) como artefato.
 - **`docker-compose-lint`:** valida a sintaxe do `docker-compose.yml` (`docker compose config`).
 - **`ci-status`:** job agregador que falha se qualquer um dos anteriores falhar — é o único *required status check* necessário na proteção de branch do `main`.
