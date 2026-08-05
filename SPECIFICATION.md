@@ -122,7 +122,7 @@ caminho feliz.
 | Requisito | Onde vive | Observação |
 | --- | --- | --- |
 | **RNF04** — Observabilidade | `src/infrastructure/logger/winston.logger.ts` | JSON estrito, injetado em todas as camadas |
-| **RNF06 / RNF08** — Autenticação | `src/presentation/middlewares/bearer-auth.ts` | `createBearerAuthHook` (callback, segredo único) e `createClientAuthHook` (ingestão, credencial por cliente) |
+| **RNF06 / RNF08** — Autenticação | `src/presentation/middlewares/bearer-auth.ts` | `createBearerAuthHook`, usado tanto na ingestão (`API_AUTH_TOKEN`) quanto no callback (`CALLBACK_AUTH_TOKEN`), com segredos distintos |
 | **RNF08** — Rate limiting | `src/presentation/middlewares/rate-limit.ts` | hook `onRequest`, roda **antes** da autenticação |
 | **RNF07** — Encerramento gracioso | `src/infrastructure/lifecycle/graceful-shutdown.ts` | ordem de teardown declarada em `src/server.ts` |
 | **RNF09** — *Backpressure* | `src/server.ts` (chave `DECISION_TRANSPORT`) | não é código novo: é a escolha de quem consome a fila |
