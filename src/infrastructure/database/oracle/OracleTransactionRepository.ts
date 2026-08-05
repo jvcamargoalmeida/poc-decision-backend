@@ -41,10 +41,6 @@ class OracleTransactionRepository implements ITransactionRepository {
       };
 
     } catch (error) {
-      // ORA-00001 = unique constraint violated. Sob concorrencia, duas requisicoes com
-      // a mesma chave podem passar juntas pela verificacao previa; quem garante a
-      // unicidade de fato e o indice do banco. Traduzimos aqui para um erro de dominio
-      // porque a camada de aplicacao nao deve conhecer codigos de erro do driver.
       if ((error as { errorNum?: number }).errorNum === 1 && transaction.idempotencyKey) {
         throw new DuplicateIdempotencyKeyError(transaction.idempotencyKey);
       }

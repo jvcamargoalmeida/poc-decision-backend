@@ -5,8 +5,6 @@ vi.mock('@/infrastructure/logger/winston.logger', () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
 }));
 
-// Cada registro adiciona listeners reais ao processo; sem a limpeza o Node emite
-// MaxListenersExceededWarning conforme os testes se acumulam.
 afterEach(() => {
   process.removeAllListeners('SIGTERM');
   process.removeAllListeners('SIGINT');
@@ -84,8 +82,6 @@ describe('registerGracefulShutdown', () => {
   });
 
   it('encerra o processo via process.exit quando nenhum exit é injetado', async () => {
-    // process.exit precisa estar mockado: sem isso, o encerramento derrubaria o
-    // próprio runner de testes.
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
     const shutdown = registerGracefulShutdown({
       steps: [{ name: 'db', run: vi.fn().mockResolvedValue(undefined) }],

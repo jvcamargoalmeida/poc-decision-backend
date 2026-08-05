@@ -22,11 +22,12 @@ function buildTransactionController(pool: oracledb.Pool, channel: Channel, mongo
   return new TransactionController(processTransactionUseCase);
 }
 
-function buildCallbackController(pool: oracledb.Pool): CallbackController {
-  const transactionRepository = new OracleTransactionRepository(pool);
-  const updateTransactionStatusUseCase = new UpdateTransactionStatusUseCase(transactionRepository);
-
-  return new CallbackController(updateTransactionStatusUseCase);
+function buildUpdateTransactionStatusUseCase(pool: oracledb.Pool): UpdateTransactionStatusUseCase {
+  return new UpdateTransactionStatusUseCase(new OracleTransactionRepository(pool));
 }
 
-export { buildTransactionController, buildCallbackController };
+function buildCallbackController(pool: oracledb.Pool): CallbackController {
+  return new CallbackController(buildUpdateTransactionStatusUseCase(pool));
+}
+
+export { buildTransactionController, buildCallbackController, buildUpdateTransactionStatusUseCase };

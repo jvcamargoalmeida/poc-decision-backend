@@ -19,11 +19,7 @@ export default defineConfig({
       reporter: ['text', 'text-summary', 'json-summary', 'lcov', 'html'],
       reportsDirectory: './coverage',
       include: ['src/**/*.ts'],
-      // server.ts e um bootstrap fino (chama app.listen/process.exit) sem
-      // valor de teste unitario; entra em coverage assim que ganhar logica.
       exclude: ['src/server.ts', 'src/**/*.d.ts'],
-      // Gate de merge (CLAUDE.md); mantenha sincronizado com MIN_COVERAGE
-      // em .github/workflows/ci.yml
       thresholds: {
         statements: 95,
         branches: 95,

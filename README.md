@@ -13,16 +13,29 @@ A arquitetura dispensa o uso de ORMs pesados em favor de drivers nativos e padr�
 * **Persistência Híbrida e Distribuída:** 
   * **Oracle DB (SQL Nativo):** Armazenamento de dados transacionais e resultados estruturados.
   * **MongoDB:** Armazenamento flexível para logs de auditoria e *payloads* brutos.
-* **Mensageria e Assincronicidade:** Desacoplamento de processos utilizando filas no **RabbitMQ** para ingestão e processamento de dados.
-* **Integração NoCode:** Orquestração de cálculos e algoritmos estatísticos externos via Webhooks comunicando-se com o **n8n**.
+* **Mensageria e Assincronicidade:** Desacoplamento de processos utilizando filas no **RabbitMQ** para ingestão e processamento de dados, com *retry* em *backoff* escalonado (agendado pelo próprio broker via TTL) e *dead-letter queue* em todas as filas.
+* **Integração NoCode:** Orquestração de cálculos e algoritmos estatísticos externos com o **n8n**, por dois transportes alternáveis — Webhook (*push*) ou consumo direto da fila pelo próprio n8n (*pull*, com *backpressure* natural).
+* **Idempotência:** Header `Idempotency-Key` do cliente, com unicidade garantida pelo banco e recuperação de corrida entre requisições concorrentes.
 * **Observabilidade (APM Ready):** Geração de logs estruturados em padrão estrito JSON através do **Winston**, prontos para ingestão em stacks de monitoramento como Datadog ou Elastic (ELK).
 
 ## 🔄 Fluxo de Negócio (Visão Geral)
 
 1. **Ingestão síncrona:** `POST /transactions` → cálculo de risco interno (Strategy Pattern) → persistência no Oracle (SQL nativo) → resposta `201/202` imediata ao cliente, sem esperar processamento externo.
 2. **Auditoria e distribuição (assíncrono):** o payload bruto é gravado no MongoDB (data lake/compliance) e um evento "Transação Criada" é publicado no RabbitMQ.
-3. **Decisão externa:** um Worker consome a fila e dispara um Webhook para o **n8n**, que roda o fluxo visual de decisão (simulando engines de fraude/crédito).
-4. **Callback:** o n8n retorna a decisão via `PATCH /callback/transactions` (autenticado por *bearer token*), atualizando o status final da transação no Oracle.
+3. **Decisão externa:** o **n8n** roda o fluxo visual de decisão (simulando engines de fraude/crédito).
+4. **Aplicação da decisão:** o status final da transação é atualizado no Oracle.
+
+Os passos 3 e 4 têm **dois transportes**, alternados pela variável `DECISION_TRANSPORT`:
+
+| | `http` | `queue` |
+| --- | --- | --- |
+| Ida | um Worker consome a fila e **empurra** um Webhook para o n8n | o próprio n8n **puxa** da fila `…decision.requests` |
+| Volta | o n8n chama `PATCH /callback/transactions` (bearer token) | o n8n publica em `…decision.results`, e o `DecisionResultWorker` aplica |
+| Quando usar | orquestrador externo/SaaS, que não deve receber credencial do broker | orquestrador interno — ganha *backpressure* de graça |
+
+A diferença não é cosmética: no modo `http` **nós** ditamos o ritmo do n8n e o saturamos sob carga
+(6.552 respostas `503` medidas no teste de carga); no modo `queue` **ele** consome no ritmo dele e
+a fila absorve o pico. Comparação completa em [`ARCHITECTURE.md`](ARCHITECTURE.md#33-dois-transportes-para-a-decisão-externa).
 
 A especificação funcional/não funcional completa (RF/RNF) e o mapeamento arquivo-a-arquivo de cada fase estão em [`SPECIFICATION.md`](SPECIFICATION.md). O progresso real da implementação (o que já está pronto vs. planejado) está em [`ROADMAP.md`](ROADMAP.md).
 
@@ -75,10 +88,15 @@ src/
 │   └── strategies/risk/  # IRiskStrategy, AmountRiskStrategy
 ├── application/          # Use Cases (Process / UpdateTransactionStatus)
 ├── infrastructure/       # Implementações: Oracle, Mongo, RabbitMQ, n8n, Winston, shutdown
+│   └── messaging/rabbitmq/
+│       ├── retry.ts                   # filas de espera por nível de backoff + NonRetryableError
+│       └── workers/
+│           ├── TransactionWorker.ts       # modo http: consome e chama o webhook do n8n
+│           └── DecisionResultWorker.ts    # modo queue: consome a decisão publicada pelo n8n
 └── presentation/         # Fastify: rotas, controllers, middlewares e composition root
 tests/                    # Testes unitários (espelha a estrutura de src/)
 db/oracle/init/           # Scripts .sql/.sh rodados na 1ª inicialização do Oracle (ver README na pasta)
-n8n-workflows/            # Fluxo do n8n versionado + template de credencial, importados no boot (ver README na pasta)
+n8n-workflows/            # Fluxos do n8n versionados (webhook e fila) + template de credencial, importados no boot (ver README na pasta)
 ```
 
 Os limites do que a IA pode gerar em cada camada estão documentados em [`CLAUDE.md`](CLAUDE.md).
@@ -109,6 +127,39 @@ Os segredos são separados de propósito: cliente e n8n são atores distintos, e
 Ambas as rotas também têm **rate limiting por IP** (`RATE_LIMIT_MAX` por `RATE_LIMIT_WINDOW_MS`), respondendo `429` com `Retry-After`. O contador roda antes da verificação de credencial — requisição não autenticada também consome cota, senão daria para brutar credencial sem limite.
 
 O n8n envia esse header através de uma credencial *Bearer Auth*. Credenciais não são versionadas junto com o workflow (o segredo não entra no git) — em vez disso, o `docker-compose.yml` materializa a credencial no boot a partir de um template com placeholder, injetando o valor do `.env` (ver [`n8n-workflows/README.md`](n8n-workflows/README.md)).
+
+### Escolhendo o transporte da decisão
+
+```bash
+DECISION_TRANSPORT=queue   # n8n consome da fila (padrão do .env.example)
+DECISION_TRANSPORT=http    # n8n recebe webhook (comportamento na ausência da variável)
+```
+
+No modo `queue` o n8n precisa falar com o broker, então a credencial `RabbitMQ account` é
+materializada no boot a partir de `RABBITMQ_USER`/`RABBITMQ_PASSWORD`. Dentro da rede do compose o
+host é `rabbitmq`, não `localhost`. Nesse modo somem o webhook e a rota de callback do caminho: o
+controle de acesso à mudança de status passa a ser do RabbitMQ, não do *bearer token*.
+
+Trocar o valor exige reiniciar a aplicação — a topologia das filas é declarada no bootstrap. As
+filas em si existem e são duráveis nos dois modos; o que muda é qual delas fica ligada à exchange.
+Só o transporte ativo recebe `transaction.created`, para que a fila do transporte ocioso não
+acumule pedidos que o outro já decidiu.
+
+### Retry antes do descarte
+
+```bash
+RETRY_DELAYS_MS=5000,30000,120000   # espera antes de cada nova tentativa
+```
+
+Uma falha transitória (n8n fora do ar, Oracle indisponível) não vira descarte na primeira tentativa:
+a mensagem vai para uma fila de espera do nível correspondente e o **próprio RabbitMQ** a devolve à
+fila de origem quando o TTL expira — sem temporizador na aplicação, então ela sobrevive à queda do
+processo. Esgotadas as tentativas, vai para a *dead-letter queue*. Falha definitiva (JSON
+malformado, contrato violado, transação inexistente) não gasta tentativa e vai direto para a DLQ.
+
+> **Atenção:** mudar esse valor num ambiente que já subiu faz o boot falhar — o RabbitMQ não altera
+> argumento de fila existente. O erro nomeia a fila e dá o comando de remoção; é uma limpeza única.
+> Detalhes e demais migrações na tabela do [`ROADMAP.md`](ROADMAP.md).
 
 ## 📚 Documentação
 

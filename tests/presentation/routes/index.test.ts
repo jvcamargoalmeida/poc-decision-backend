@@ -19,7 +19,6 @@ const fakeMongoConnection = { model: vi.fn().mockReturnValue(vi.fn()) } as unkno
 const CALLBACK_TOKEN = 'token-de-teste';
 const authHook = createBearerAuthHook(CALLBACK_TOKEN);
 const authHeaders = { authorization: `Bearer ${CALLBACK_TOKEN}` };
-// Limite alto: estes testes verificam roteamento/auth, nao rate limiting.
 const semLimitePratico = () => createRateLimitHook({ max: 10_000, windowMs: 60_000 });
 
 describe('registerRoutes', () => {

@@ -5,7 +5,7 @@
     "id": "HzZSnB2P7GmjA1Zj",
     "name": "Decision",
     "description": null,
-    "active": true,
+    "active": false,
     "isArchived": false,
     "nodes": [
       {

@@ -207,7 +207,6 @@ describe('OracleTransactionRepository', () => {
       const close = vi.fn().mockResolvedValue(undefined);
       const repo = new OracleTransactionRepository(createFakePool({ execute, close }));
 
-      // Sem chave, a violacao veio de outra restricao: deve propagar como esta.
       await expect(repo.save(sampleTransaction)).rejects.toThrow(oraErro);
     });
 

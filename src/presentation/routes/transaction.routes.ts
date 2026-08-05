@@ -4,8 +4,6 @@ import type { BearerAuthHook } from '@/presentation/middlewares/bearer-auth';
 import type { RateLimitHook } from '@/presentation/middlewares/rate-limit';
 
 const createTransactionSchema = {
-  // Opcional e sem `required`: mantem compatibilidade com clientes que nao enviam a
-  // chave. Quem envia ganha retry seguro; quem nao envia mantem o comportamento antigo.
   headers: {
     type: 'object',
     properties: {
@@ -29,8 +27,6 @@ export async function registerTransactionRoutes(
   authHook: BearerAuthHook,
   rateLimitHook: RateLimitHook,
 ): Promise<void> {
-  // `onRequest` roda antes de `preHandler`: barrar por excesso de requisicoes e
-  // mais barato do que verificar credencial, e protege a propria verificacao.
   app.post<{ Body: CreateTransactionBody }>(
     '/transactions',
     { schema: createTransactionSchema, onRequest: rateLimitHook, preHandler: authHook },

@@ -74,7 +74,5 @@ if (args.out) {
 }
 
 if (!passed) {
-  // O gate real de cobertura e feito pelo `vitest run --coverage` (thresholds
-  // no vitest.config.mts). Este script e apenas informativo/relatorio.
   console.warn(`Cobertura abaixo do minimo exigido de ${minCoverage}%.`);
 }
