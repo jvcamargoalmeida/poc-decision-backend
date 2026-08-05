@@ -10,7 +10,7 @@ A arquitetura dispensa o uso de ORMs pesados em favor de drivers nativos e padr�
 
 ### 🏗️ Destaques Arquiteturais:
 * **Alta Volumetria (Throughput):** Roteamento otimizado com Fastify.
-* **Persistência Híbrida e Distribuída:** 
+* **Persistência Híbrida e Distribuída:**
   * **Oracle DB (SQL Nativo):** Armazenamento de dados transacionais e resultados estruturados.
   * **MongoDB:** Armazenamento flexível para logs de auditoria e *payloads* brutos.
 * **Mensageria e Assincronicidade:** Desacoplamento de processos utilizando filas no **RabbitMQ** para ingestão e processamento de dados, com *retry* em *backoff* escalonado (agendado pelo próprio broker via TTL) e *dead-letter queue* em todas as filas.
@@ -44,22 +44,84 @@ A especificação funcional/não funcional completa (RF/RNF) e o mapeamento arqu
 * [nvm](https://github.com/nvm-sh/nvm) — a versão do Node é fixada em [`.nvmrc`](.nvmrc)
 * [Docker](https://www.docker.com/) e Docker Compose — para subir RabbitMQ, MongoDB, Oracle XE e n8n localmente
 
-## 🚀 Como rodar
+## 🚀 Como rodar (passo a passo)
+
+### 1. Clone o repositório
 
 ```bash
-nvm use
+git clone https://github.com/jvcamargoalmeida/poc-decision-backend.git
+cd poc-decision-backend
+```
+
+### 2. Use a versão certa do Node e instale as dependências
+
+```bash
+nvm use        # lê a versão fixada em .nvmrc
 npm install
+```
+
+### 3. Copie o `.env`
+
+```bash
 cp .env.example .env
+```
 
-# sobe RabbitMQ, MongoDB, Oracle XE e n8n
-# (o n8n importa, publica e credencia o fluxo de decisão sozinho na 1ª subida —
-# ver n8n-workflows/README.md; nenhum passo manual é necessário)
+Os valores padrão já sobem o projeto funcionando (Oracle/Mongo/RabbitMQ locais, `DECISION_TRANSPORT=queue`). Os três segredos (`API_AUTH_TOKEN`, `CALLBACK_AUTH_TOKEN`, `N8N_WEBHOOK_TOKEN`) vêm com um placeholder — para gerar um valor de verdade:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### 4. Suba a infraestrutura
+
+```bash
 docker compose up -d
+```
 
+Isso sobe RabbitMQ, MongoDB, Oracle XE e n8n. Na primeira subida, o n8n importa e publica os dois workflows de decisão e materializa as credenciais (incluindo a do RabbitMQ) a partir do `.env` — nenhum passo manual é necessário (detalhes em [`n8n-workflows/README.md`](n8n-workflows/README.md)). O Oracle XE demora um pouco para ficar pronto na primeira vez (roda o script de criação da tabela); acompanhe com:
+
+```bash
+docker compose logs -f oracle-xe   # espere aparecer "DATABASE IS READY TO USE"
+docker compose ps                  # todos os serviços devem estar "healthy"
+```
+
+### 5. Suba a aplicação
+
+```bash
 npm run dev
 ```
 
-O servidor sobe em `http://localhost:3000`; `GET /health` retorna o status da aplicação.
+O servidor sobe em `http://localhost:3000`. Confirme que está tudo de pé:
+
+```bash
+curl http://localhost:3000/health
+# {"status":"ok", ...}
+```
+
+## 📮 Testando com o Postman
+
+A collection [`poc_decision_backend.postman_collection.json`](poc_decision_backend.postman_collection.json), na raiz do repositório, já vem com os requests do fluxo completo e a descrição de cada rota.
+
+### 1. Importe a collection
+
+No Postman: `File → Import` → selecione o arquivo, ou arraste-o para a janela do Postman.
+
+### 2. Preencha as variáveis da collection
+
+Clique na collection → aba *Variables* → preencha `apiToken` e `callbackToken` com os valores de `API_AUTH_TOKEN` e `CALLBACK_AUTH_TOKEN` do seu `.env` (`url` e `n8n` já vêm com os padrões locais, `http://localhost:3000` e `http://localhost:5678`).
+
+### 3. Rode os requests, nessa ordem
+
+| Request | O que faz |
+| --- | --- |
+| `Health` | confere que a API está de pé |
+| `Create Transaction` | cria uma transação (`amount`/`currency`) — a resposta já mostra `riskScore`; guarda o `id` automaticamente em `transactionId` |
+| `Callback (decisão do n8n)` | simula o callback do n8n usando o `transactionId` capturado — só se aplica no modo `DECISION_TRANSPORT=http` |
+| `n8n disparar decisão manualmente` | dispara o webhook do n8n direto, útil para depurar o modo `http` sem esperar o worker |
+| `Load Test Create Transaction (aleatório)` | cria uma transação com valor aleatório, para variar o `riskScore` sorteado |
+| `Bulk Send (envio em massa)` | dispara `bulkCount` transações em sequência (padrão 1000) — ajuste a variável `bulkCount` na collection |
+
+No padrão do `.env.example` (`DECISION_TRANSPORT=queue`), basta rodar `Create Transaction`: o n8n consome a fila sozinho, decide e publica o resultado — sem precisar chamar `Callback` manualmente. Para acompanhar a decisão sendo aplicada, consulte o Oracle ou veja a execução em `http://localhost:5678` (usuário/senha não são exigidos por padrão nesta imagem local do n8n).
 
 ## 📜 Scripts disponíveis
 
