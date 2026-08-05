@@ -6,7 +6,6 @@ Diagramas do sistema como ele está implementado hoje, derivados de
 > **Sobre status de implementação:** este documento descreve *arquitetura*, não progresso.
 > O que já está pronto vs. planejado é rastreado exclusivamente em [`ROADMAP.md`](ROADMAP.md) —
 > uma versão anterior deste arquivo duplicava esse status em cada seção e envelheceu mal.
-> Débitos técnicos conhecidos ficam na seção "Gaps Conhecidos" do roadmap.
 
 ## 1. Arquitetura de Eventos
 
@@ -71,8 +70,10 @@ Dois pontos de ordenação que são deliberados, não acidentais:
 
 `publish` e `logTransaction` rodam sob `Promise.allSettled`: quando eles executam, o Oracle já
 confirmou a escrita, então uma falha de RabbitMQ ou Mongo é registrada com severidade alta mas
-**não** vira `500` — o cliente recebe `201` porque a transação de fato existe. O custo assumido
-está no roadmap: uma falha de `publish` deixa a transação `PENDING` sem ninguém decidir.
+**não** vira `500` — o cliente recebe `201` porque a transação de fato existe. O custo assumido é
+que uma falha de `publish` deixa a transação `PENDING` sem ninguém decidir — mitigado pelo retry
+com *backoff* da seção 3.4, mas não eliminado: se o `publish` inicial falhar, nem a fila de retry
+entra em cena, porque a mensagem nunca chegou ao broker.
 
 ### 1.2 Transporte `queue` — o n8n puxa da fila
 
@@ -165,7 +166,7 @@ classDiagram
     }
     class IAuditRepository {
         <<interface>>
-        +logTransaction(id, payload) Promise~void~
+        +logTransaction(id, payload, clientId?) Promise~void~
     }
     class IDecisionGateway {
         <<interface>>
@@ -383,8 +384,7 @@ saturação que o teste de carga mediu. Ou seja: o padrão do *código* é o seg
 A troca em si não perde mensagem: as filas continuam duráveis nos dois modos, só o vínculo com a
 exchange muda. O que **não** é reversível sozinho é um acúmulo anterior — uma fila que ficou com
 mensagens de antes do vínculo condicional precisa ser esvaziada uma vez
-(`rabbitmqctl purge_queue`), senão o worker do modo de destino drena histórico já decidido. Ver
-[`ROADMAP.md`](ROADMAP.md).
+(`rabbitmqctl purge_queue`), senão o worker do modo de destino drena histórico já decidido.
 
 ### 3.4 Retry com backoff antes do descarte
 

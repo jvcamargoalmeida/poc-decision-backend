@@ -111,10 +111,11 @@ Commits seguem o formato `tipo: descrição`. Cada tipo usado nos commits de uma
 | `ci` | `ci` |
 | `docs` | `docs` |
 | `test` | `test` |
+| `revert` | `revert` |
 
 Regras:
 - Uma PR com commits de mais de um tipo recebe todas as labels correspondentes.
-- Se surgir um prefixo novo ainda não mapeado nesta tabela (ex.: `refactor`, `perf`, `build`, `revert`), a label correspondente deve ser criada no momento (mesmo nome do prefixo) e esta tabela deve ser atualizada com a nova entrada.
+- Se surgir um prefixo novo ainda não mapeado nesta tabela (ex.: `refactor`, `perf`, `build`), a label correspondente deve ser criada no momento (mesmo nome do prefixo) e esta tabela deve ser atualizada com a nova entrada. `revert` já passou por isso — entrada acrescentada quando o primeiro commit desse tipo apareceu numa PR.
 - Aplicar a label depende de acesso de escrita à API do GitHub (`gh` autenticado ou token equivalente); sem isso, a label deve ao menos ser sinalizada explicitamente para aplicação manual.
 
 ### Quando um commit dispensa branch nova

@@ -108,6 +108,29 @@ prova prática da inversão de dependência que o resto do documento descreve.
 
 ---
 
+## 3.2 Requisitos Transversais (Mapeamento de Arquivos)
+
+Os RNFs abaixo não pertencem a uma fase específica da jornada — atravessam várias. Ficam mapeados
+aqui para que a especificação continue sendo um mapa arquivo-a-arquivo completo, e não só do
+caminho feliz.
+
+| Requisito | Onde vive | Observação |
+| --- | --- | --- |
+| **RNF04** — Observabilidade | `src/infrastructure/logger/winston.logger.ts` | JSON estrito, injetado em todas as camadas |
+| **RNF06 / RNF08** — Autenticação | `src/presentation/middlewares/bearer-auth.ts` | `createBearerAuthHook` (callback, segredo único) e `createClientAuthHook` (ingestão, credencial por cliente) |
+| **RNF08** — Rate limiting | `src/presentation/middlewares/rate-limit.ts` | hook `onRequest`, roda **antes** da autenticação |
+| **RNF07** — Encerramento gracioso | `src/infrastructure/lifecycle/graceful-shutdown.ts` | ordem de teardown declarada em `src/server.ts` |
+| **RNF09** — *Backpressure* | `src/server.ts` (chave `DECISION_TRANSPORT`) | não é código novo: é a escolha de quem consome a fila |
+| **RNF10 / RNF11** — DLQ e retry | `src/infrastructure/messaging/rabbitmq/retry.ts` | topologia das filas de espera, `RetryScheduler` e `NonRetryableError`; consumido no branch de erro dos dois workers |
+| **RNF12** — Atribuição de identidade | `bearer-auth.ts` → `TransactionController` → `ProcessTransactionUseCase` → `MongoAuditRepository` | `clientId` atravessa as quatro camadas até o campo indexado do audit log |
+| **RF09** — Idempotência | `OracleTransactionRepository` (índice único + tradução do `ORA-00001`) e `ProcessTransactionUseCase` (curto-circuito e recuperação de corrida) | quem garante unicidade é o banco, não a verificação prévia |
+
+O tratamento de erro global (`src/presentation/middlewares/error-handler.ts`) é o que converte os
+erros de domínio em status HTTP — a fronteira que permite ao domínio não conhecer o protocolo de
+transporte.
+
+---
+
 ## 4. Testes de Carga e Validação Arquitetural (Stress Test)
 
 O principal objetivo desta PoC é comprovar estabilidade sob alta volumetria. A validação não será feita por envios unitários (Postman/Insomnia), mas sim por injeção de carga massiva.

@@ -88,9 +88,11 @@ src/
 │   └── strategies/risk/  # IRiskStrategy, AmountRiskStrategy
 ├── application/          # Use Cases (Process / UpdateTransactionStatus)
 ├── infrastructure/       # Implementações: Oracle, Mongo, RabbitMQ, n8n, Winston, shutdown
-│   └── messaging/rabbitmq/workers/
-│       ├── TransactionWorker.ts       # modo http: consome e chama o webhook do n8n
-│       └── DecisionResultWorker.ts    # modo queue: consome a decisão publicada pelo n8n
+│   └── messaging/rabbitmq/
+│       ├── retry.ts                   # filas de espera por nível de backoff + NonRetryableError
+│       └── workers/
+│           ├── TransactionWorker.ts       # modo http: consome e chama o webhook do n8n
+│           └── DecisionResultWorker.ts    # modo queue: consome a decisão publicada pelo n8n
 └── presentation/         # Fastify: rotas, controllers, middlewares e composition root
 tests/                    # Testes unitários (espelha a estrutura de src/)
 db/oracle/init/           # Scripts .sql/.sh rodados na 1ª inicialização do Oracle (ver README na pasta)
@@ -147,6 +149,22 @@ Trocar o valor exige reiniciar a aplicação — a topologia das filas é declar
 filas em si existem e são duráveis nos dois modos; o que muda é qual delas fica ligada à exchange.
 Só o transporte ativo recebe `transaction.created`, para que a fila do transporte ocioso não
 acumule pedidos que o outro já decidiu.
+
+### Retry antes do descarte
+
+```bash
+RETRY_DELAYS_MS=5000,30000,120000   # espera antes de cada nova tentativa
+```
+
+Uma falha transitória (n8n fora do ar, Oracle indisponível) não vira descarte na primeira tentativa:
+a mensagem vai para uma fila de espera do nível correspondente e o **próprio RabbitMQ** a devolve à
+fila de origem quando o TTL expira — sem temporizador na aplicação, então ela sobrevive à queda do
+processo. Esgotadas as tentativas, vai para a *dead-letter queue*. Falha definitiva (JSON
+malformado, contrato violado, transação inexistente) não gasta tentativa e vai direto para a DLQ.
+
+> **Atenção:** mudar esse valor num ambiente que já subiu faz o boot falhar — o RabbitMQ não altera
+> argumento de fila existente. O erro nomeia a fila e dá o comando de remoção; é uma limpeza única.
+> Detalhes e demais migrações na tabela do [`ROADMAP.md`](ROADMAP.md).
 
 ## 📚 Documentação
 

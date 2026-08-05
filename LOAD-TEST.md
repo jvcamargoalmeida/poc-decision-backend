@@ -87,29 +87,40 @@ Estado final no Oracle, depois da fila drenar por completo:
 Ou seja: **cerca de metade das transações aceitas com `201` nunca recebeu decisão**, e o cliente
 não tem como saber disso. Do ponto de vista dele, todas foram aceitas com sucesso.
 
-Isso validou empiricamente dois gaps que estavam documentados apenas como hipótese — e **ambos
+Isso validou empiricamente gaps que estavam documentados apenas como hipótese — e **todos
 foram corrigidos depois deste teste**:
 
 - **Ausência de dead-letter queue** — deixou de ser risco teórico e virou perda medida de 7.866
   mensagens numa única execução de 30 segundos. Hoje a fila é declarada com
   `x-dead-letter-exchange` e a mensagem rejeitada cai em `transactions.queue.dead`, com o header
-  `x-death` preservando motivo e origem. O mesmo cenário, hoje, não perderia nada: as 7.866
-  mensagens estariam disponíveis para reprocessamento.
+  `x-death` preservando motivo e origem.
 - **Ausência de rate limiting** — nada protegeu o n8n de receber mais carga do que aguenta. Hoje
   existe limite por IP com resposta `429`.
+- **Ausência de retry** — uma falha do n8n (o próprio `503` medido aqui) ia direto para a DLQ, sem
+  tentativa intermediária. Hoje existe uma fila de espera por nível de *backoff* (5s/30s/120s por
+  padrão) entre o worker e a fila morta: o RabbitMQ agenda a nova tentativa via `x-message-ttl`,
+  sem temporizador na aplicação. Só falha definitiva (contrato violado, payload malformado) ainda
+  vai direto para a DLQ. Detalhes em [`ARCHITECTURE.md`](ARCHITECTURE.md#34-retry-com-backoff-antes-do-descarte).
+- **Transporte alternativo por fila** — além das correções pontuais acima, a causa raiz também foi
+  atacada: com `DECISION_TRANSPORT=queue`, é o n8n quem **puxa** da fila no ritmo dele, em vez de o
+  worker empurrar HTTP sem controle de vazão. É o que elimina de raiz a classe de saturação medida
+  nesta página, não apenas mitiga a consequência. Ver seção 3.3 do [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+O mesmo cenário de carga, hoje, não perderia as 7.866 mensagens: no modo `http` elas passariam
+pelo retry antes de qualquer descarte definitivo; no modo `queue` a saturação do n8n sequer
+ocorreria, porque ele nunca recebe mais do que consegue processar.
 
 ## Conclusão
 
 O RNF01 é atendido **na borda síncrona**: a ingestão sustentou ~515 req/s com 100 conexões
 concorrentes, sem recusar requisição e sem perder gravação no Oracle.
 
-O sistema como um todo, na época deste teste, **não era resiliente sob a mesma carga**: a etapa de
-decisão externa degradava silenciosamente e descartava trabalho. As duas correções que esse
-resultado motivou (dead-letter queue e rate limiting) já foram implementadas.
-
-O que **continua em aberto** é a saturação do próprio n8n: o limitador reduz a pressão sobre ele,
-mas não implementa retry — uma mensagem que falha vai para a fila morta e depende de
-reprocessamento manual. Um retry com backoff antes do descarte seria o próximo passo natural.
+O sistema como um todo, **na época deste teste**, não era resiliente sob a mesma carga: a etapa de
+decisão externa degradava silenciosamente e descartava trabalho. As quatro correções que esse
+resultado motivou (dead-letter queue, rate limiting, retry com backoff e o transporte por fila)
+já foram implementadas — nenhuma delas foi re-executada sob o mesmo cenário de 100 conexões, então
+os números desta página continuam sendo os que existem; o que mudou é o comportamento do sistema
+diante deles, não a medição em si.
 
 Para melhorar o número da ingestão em si, o primeiro experimento óbvio é aumentar
 `ORACLE_POOL_MAX` e tirar `publish`/`logTransaction` do caminho da requisição — nessa ordem,
