@@ -16,9 +16,6 @@ class ProcessTransactionUseCase {
   ) { }
 
   async execute(amount: number, currency: string, idempotencyKey?: string): Promise<Transaction> {
-    // Retry seguro: se o cliente repetir a requisicao com a mesma chave (porque a
-    // resposta anterior se perdeu, por exemplo), devolvemos o resultado original em
-    // vez de criar uma segunda transacao.
     if (idempotencyKey) {
       const jaProcessada = await this.transactionRepository.findByIdempotencyKey(idempotencyKey);
       if (jaProcessada) {
@@ -44,10 +41,6 @@ class ProcessTransactionUseCase {
     try {
       savedTransaction = await this.transactionRepository.save(transaction);
     } catch (error) {
-      // Corrida: duas requisicoes com a mesma chave passaram juntas pela verificacao
-      // acima e ambas tentaram inserir. O indice unico do banco garantiu que so uma
-      // vencesse; aqui apenas recuperamos a vencedora, para que os dois chamadores
-      // recebam a mesma resposta.
       if (error instanceof DuplicateIdempotencyKeyError) {
         const vencedora = await this.transactionRepository.findByIdempotencyKey(error.idempotencyKey);
         if (vencedora) {

@@ -49,8 +49,6 @@ function registerGracefulShutdown({
 
     logger.info('Encerrando aplicação', { signal });
 
-    // Rede de segurança: se algum passo travar (ex.: conexão sem resposta), o
-    // processo sai mesmo assim em vez de ficar pendurado até o SIGKILL.
     const forceTimer = setTimeout(() => {
       logger.error('Timeout no encerramento, forçando saída', { timeoutMs });
       exit(1);

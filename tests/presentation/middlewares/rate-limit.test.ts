@@ -80,13 +80,10 @@ describe('createRateLimitHook', () => {
     let agora = 1_000_000;
     const hook = createRateLimitHook({ max: 1, windowMs: 1_000, now: () => agora });
 
-    // Passa do limiar de varredura com IPs distintos e de uso unico.
     for (let i = 0; i < 10_001; i += 1) {
       await hook(createRequest(`10.0.${Math.floor(i / 256)}.${i % 256}`), createReply().reply);
     }
 
-    // Com todas as janelas vencidas, o proximo acesso dispara a varredura e o
-    // limite volta a valer normalmente para um IP ja visto.
     agora += 5_000;
     await expect(hook(createRequest('10.0.0.1'), createReply().reply)).resolves.toBeUndefined();
     await expect(hook(createRequest('10.0.0.1'), createReply().reply)).rejects.toThrow(TooManyRequestsError);

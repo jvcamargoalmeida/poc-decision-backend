@@ -115,7 +115,6 @@ describe('ProcessTransactionUseCase', () => {
     const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
 
     await expect(useCase.execute(100, 'BRL')).resolves.toEqual(savedTransaction);
-    // Falha no evento nao impede a auditoria: as duas rodam em paralelo, isoladas.
     expect(auditRepository.logTransaction).toHaveBeenCalled();
   });
 
@@ -157,8 +156,6 @@ describe('ProcessTransactionUseCase', () => {
 
     const useCase = new ProcessTransactionUseCase(transactionRepository, riskStrategy, mqPublisher, auditRepository);
 
-    // O Oracle confirmou a escrita: devolver 500 aqui reportaria como falha algo que
-    // de fato aconteceu. O preco assumido e a transacao ficar PENDING sem decisao.
     await expect(useCase.execute(100, 'BRL')).resolves.toEqual(savedTransaction);
   });
 
@@ -182,7 +179,6 @@ describe('ProcessTransactionUseCase', () => {
 
       expect(resultado).toEqual(existente);
       expect(transactionRepository.save).not.toHaveBeenCalled();
-      // Nao republica evento nem reaudita: o pedido ja foi processado uma vez.
       expect(mqPublisher.publish).not.toHaveBeenCalled();
       expect(auditRepository.logTransaction).not.toHaveBeenCalled();
     });
@@ -215,9 +211,7 @@ describe('ProcessTransactionUseCase', () => {
     it('resolve a corrida devolvendo a transação vencedora quando o banco rejeita a duplicata', async () => {
       const { transactionRepository, riskStrategy, mqPublisher, auditRepository } = createDeps();
       vi.mocked(riskStrategy.calculateRisk).mockReturnValue(RiskLevel.LOW);
-      // Passou pela verificacao previa (ninguem tinha gravado ainda)...
       vi.mocked(transactionRepository.findByIdempotencyKey).mockResolvedValueOnce(null);
-      // ...mas o concorrente inseriu primeiro e o indice unico barrou este.
       vi.mocked(transactionRepository.save).mockRejectedValue(new DuplicateIdempotencyKeyError('chave-123'));
       vi.mocked(transactionRepository.findByIdempotencyKey).mockResolvedValueOnce(existente);
 

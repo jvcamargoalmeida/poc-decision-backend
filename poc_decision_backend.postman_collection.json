@@ -915,12 +915,6 @@
           "script": {
             "type": "text/javascript",
             "exec": [
-              "// Dispara `bulkCount` transacoes numa unica execucao, com valores aleatorios",
-              "// cobrindo as tres faixas de risco. Sequencial de proposito: pm.sendRequest em",
-              "// paralelo nao garante que os callbacks terminem antes do fim do script.",
-              "// pm.variables.get resolve em TODOS os escopos (environment, collection, runtime).",
-              "// pm.collectionVariables.get leria so o escopo de collection e devolveria vazio",
-              "// quando o token vem de um environment — foi exatamente o bug que quebrou este script.",
               "const total   = Number(pm.variables.get('bulkCount')) || 25;",
               "const base    = pm.variables.get('url');",
               "const token   = pm.variables.get('apiToken');",
