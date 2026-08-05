@@ -1,0 +1,154 @@
+[
+  {
+    "id": "QueueDecisionFlow01",
+    "name": "Decision (fila)",
+    "active": true,
+    "nodes": [
+      {
+        "parameters": {
+          "queue": "transactions.queue.decision.requests",
+          "options": {
+            "onlyContent": true,
+            "jsonParseBody": true,
+            "jsonParse": true
+          }
+        },
+        "type": "n8n-nodes-base.rabbitmqTrigger",
+        "typeVersion": 1,
+        "position": [
+          0,
+          0
+        ],
+        "id": "aa000000-0000-4000-8000-000000000001",
+        "name": "RabbitMQ Trigger",
+        "credentials": {
+          "rabbitmq": {
+            "id": "RabbitMQCredential1",
+            "name": "RabbitMQ account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "typeValidation": "loose",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "bb000000-0000-4000-8000-000000000002",
+                "leftValue": "={{ $json.data.riskScore }}",
+                "rightValue": "HIGH",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "or"
+          },
+          "looseTypeValidation": true,
+          "options": {}
+        },
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          220,
+          0
+        ],
+        "id": "cc000000-0000-4000-8000-000000000003",
+        "name": "If"
+      },
+      {
+        "parameters": {
+          "mode": "exchange",
+          "exchange": "amq.topic",
+          "exchangeType": "topic",
+          "routingKey": "transaction.decided",
+          "sendInputData": false,
+          "message": "={\n  \"id\": \"{{ $json.data.id }}\",\n  \"status\": \"FAILED\"\n}",
+          "options": {},
+          "operation": "sendMessage"
+        },
+        "type": "n8n-nodes-base.rabbitmq",
+        "typeVersion": 1,
+        "position": [
+          460,
+          -110
+        ],
+        "id": "dd000000-0000-4000-8000-000000000004",
+        "name": "Publicar FAILED",
+        "credentials": {
+          "rabbitmq": {
+            "id": "RabbitMQCredential1",
+            "name": "RabbitMQ account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "exchange",
+          "exchange": "amq.topic",
+          "exchangeType": "topic",
+          "routingKey": "transaction.decided",
+          "sendInputData": false,
+          "message": "={\n  \"id\": \"{{ $json.data.id }}\",\n  \"status\": \"COMPLETED\"\n}",
+          "options": {},
+          "operation": "sendMessage"
+        },
+        "type": "n8n-nodes-base.rabbitmq",
+        "typeVersion": 1,
+        "position": [
+          460,
+          90
+        ],
+        "id": "ee000000-0000-4000-8000-000000000005",
+        "name": "Publicar COMPLETED",
+        "credentials": {
+          "rabbitmq": {
+            "id": "RabbitMQCredential1",
+            "name": "RabbitMQ account"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "RabbitMQ Trigger": {
+        "main": [
+          [
+            {
+              "node": "If",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "If": {
+        "main": [
+          [
+            {
+              "node": "Publicar FAILED",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Publicar COMPLETED",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "pinData": {},
+    "tags": []
+  }
+]
