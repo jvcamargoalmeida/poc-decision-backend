@@ -137,30 +137,11 @@ O RabbitMQ **não altera argumento de fila já criada** — o app não sobe (`40
 
 ### Continua em aberto
 
-- **A auditoria não atribui identidade**: o token de ingestão é um segredo compartilhado, então o audit log registra *o que* aconteceu, não *qual cliente* pediu. Ver a nota de escopo abaixo — isso é limite assumido, não pendência.
+- **Sem *outbox pattern***: uma falha do `publish` na ingestão não é recuperável pelo retry, porque a mensagem nunca chegou ao broker. A saída seria gravar o evento na mesma transação do Oracle e um relay publicar depois.
 - **Auditoria é registro único por transação**: `transactionId` é `unique` na coleção, então auditar eventos posteriores (a mudança de status, por exemplo) falharia por chave duplicada. Virar trilha de eventos exige remover a unicidade ou compô-la com o tipo de evento.
-- **Sem *outbox pattern***: uma falha do `publish` na ingestão não é recuperável pelo retry, porque a mensagem nunca chegou ao broker.
+- **Rate limit em memória**: o estado vive no processo, então com várias instâncias o teto efetivo vira `max × instâncias`. Em cluster exigiria um store compartilhado.
 
-## Nota de Escopo: identidade por cliente, construída e removida
-
-A especificação original desta PoC tem **RF01–RF08 e RNF01–RNF05**. Boa parte dos requisitos que
-apareceram depois nasceu de origem legítima — RF09 e RF10 foram pedidos diretos, RNF06 e RNF07
-estavam nas fases planejadas, e RNF10/RNF11 vieram de uma falha **medida** no teste de carga
-(7.866 mensagens perdidas em 30s).
-
-A atribuição de identidade por cliente (`API_CLIENTS`, `clientId` no audit log) **não** tinha essa
-origem. Ela nasceu de um gap que foi documentado e depois fechado dentro do próprio ciclo de
-trabalho, sem nunca ter sido pedida nem ter relação com o objetivo declarado da PoC — *comprovar
-estabilidade sob alta volumetria*. Credencial por cliente não torna o sistema mais estável sob
-carga; torna o projeto maior.
-
-Chegou a ser implementada por inteiro (hook que resolvia o cliente em tempo constante, `clientId`
-atravessando as quatro camadas até um campo indexado no Mongo, 13 testes, validada ponta a ponta) e
-foi **removida**. O motivo é o que importa registrar: um requisito escrito *depois* do código, para
-justificar o código, não é requisito — é racionalização. O `CLAUDE.md` define a
-[`SPECIFICATION.md`](SPECIFICATION.md) como fonte de verdade, e essa direção só funciona num
-sentido.
-
-O que fica no lugar é o limite assumido: **a trilha de auditoria responde *o que* aconteceu, não
-*quem* pediu.** Resolver isso de verdade exigiria credencial por consumidor e um modelo de
-permissão junto — trabalho de produto, não de PoC.
+*Fora desta lista de propósito: a trilha de auditoria registra **o que** aconteceu, não **quem**
+pediu. Chegou a existir credencial por cliente e foi removida — não tinha relação com o objetivo da
+PoC (estabilidade sob alta volumetria) e o requisito que a justificava foi escrito depois do código.
+É limite de escopo assumido, não pendência.*

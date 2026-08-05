@@ -69,11 +69,10 @@ agente propõe algo que a [`SPECIFICATION.md`](SPECIFICATION.md) não pede, o ca
 mudança de escopo **antes** e deixar o engenheiro decidir — não implementar e depois acrescentar um
 RF/RNF descrevendo o que já foi feito.
 
-Isso já aconteceu neste repositório: a atribuição de identidade por cliente foi implementada e
-ganhou um "RNF12" escrito depois, para descrevê-la. Foi revertida — o registro completo está na
-"Nota de Escopo" ao fim do [`ROADMAP.md`](ROADMAP.md). O sintoma a vigiar é um gap que o próprio
-agente documenta e em seguida fecha, tratando a lista de pendências dele como se fosse escopo do
-projeto.
+Isso já aconteceu neste repositório: a atribuição de identidade por cliente (`API_CLIENTS`,
+`clientId` no audit log) foi implementada e ganhou um "RNF12" escrito depois, para descrevê-la —
+e foi revertida no commit `567b585`. O sintoma a vigiar é um gap que o próprio agente documenta e
+em seguida fecha, tratando a lista de pendências dele como se fosse escopo do projeto.
 
 ---
 

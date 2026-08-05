@@ -35,8 +35,7 @@ Este documento descreve as capacidades do sistema, suas restrições arquitetura
 > registra *o que* aconteceu, não *qual cliente* pediu — o token de ingestão é um segredo
 > compartilhado. Resolver isso exigiria credencial por consumidor (ou JWT com `sub`) e um modelo de
 > permissão, o que não tem relação com o objetivo desta PoC (estabilidade sob alta volumetria).
-> Chegou a ser implementado e foi **removido** por ser desvio de escopo — ver nota no
-> [`ROADMAP.md`](ROADMAP.md).
+> Chegou a ser implementado e foi **removido** por ser desvio de escopo.
 
 ---
 
