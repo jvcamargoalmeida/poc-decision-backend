@@ -166,7 +166,7 @@ classDiagram
     }
     class IAuditRepository {
         <<interface>>
-        +logTransaction(id, payload, clientId?) Promise~void~
+        +logTransaction(id, payload) Promise~void~
     }
     class IDecisionGateway {
         <<interface>>
@@ -445,7 +445,6 @@ erDiagram
         ObjectId _id PK
         String transactionId UK "required, unique, index"
         Mixed payload "required"
-        String clientId "opcional, index — quem originou"
         Date createdAt "default now"
     }
 ```
@@ -476,9 +475,10 @@ Dois pontos que valem atenção nesse modelo:
   múltiplos `NULL`s, então a chave continua opcional e as linhas antigas seguem válidas. É o banco
   — não a verificação prévia na aplicação — que resolve duas requisições concorrentes com a mesma
   chave; a aplicação só recupera a vencedora depois do `ORA-00001`.
-- **`clientId` é indexado e opcional**: é o campo que responde "o que este cliente submeteu?", e a
-  trilha só passa a ter essa resposta quando `API_CLIENTS` define credencial por cliente. Documentos
-  gravados antes disso continuam válidos sem ele — daí ser opcional em vez de obrigatório.
+- **A auditoria não registra *quem* pediu**, só o que aconteceu: o token de ingestão é um segredo
+  compartilhado, não uma credencial por cliente. É limitação assumida do escopo da PoC — atribuir
+  identidade exigiria credencial por consumidor e um modelo de permissão junto, que não têm relação
+  com o objetivo de estabilidade sob alta volumetria.
 
 ---
 

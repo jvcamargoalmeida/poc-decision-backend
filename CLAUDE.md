@@ -59,9 +59,21 @@ As restrições acima são o padrão. O engenheiro responsável pode suspendê-l
 | Implementação completa da idempotência (`ProcessTransactionUseCase`, `OracleTransactionRepository.findByIdempotencyKey`, `DuplicateIdempotencyKeyError`, DDL do índice único) | a pedido explícito do engenheiro, durante a resolução dos gaps de débito técnico | tratamento de corrida em nível de banco, com trade-offs que valiam ser demonstrados por inteiro em vez de esqueleto |
 | Implementação completa do `DecisionResultWorker` (parse, revalidação de contrato e roteamento da mensagem) | Fase 10 | é o par simétrico do `CallbackController`, que já existia; a lógica de decisão em si continua no n8n, não no worker |
 | Retry com *backoff* (`retry.ts` e a classificação de falha no branch de erro dos dois workers) | fechamento dos gaps em aberto | é resiliência de infraestrutura e topologia de broker — escopo já aprovado —, e não toca regra de negócio: o worker continua sem decidir nada sobre a transação, só sobre a entrega da mensagem |
-| Credencial por cliente e propagação do `clientId` até o audit log | fechamento dos gaps em aberto | *middleware* de apresentação e campo de auditoria; a mudança na assinatura de `IAuditRepository` é encanamento, não invariante de domínio |
 
 Fora destas linhas, a restrição segue valendo integralmente.
+
+### 4. Requisito não se escreve depois do código
+
+Uma exceção autoriza **gerar código**; ela não autoriza inventar o requisito que o justifica. Se um
+agente propõe algo que a [`SPECIFICATION.md`](SPECIFICATION.md) não pede, o caminho é propor a
+mudança de escopo **antes** e deixar o engenheiro decidir — não implementar e depois acrescentar um
+RF/RNF descrevendo o que já foi feito.
+
+Isso já aconteceu neste repositório: a atribuição de identidade por cliente foi implementada e
+ganhou um "RNF12" escrito depois, para descrevê-la. Foi revertida — o registro completo está na
+"Nota de Escopo" ao fim do [`ROADMAP.md`](ROADMAP.md). O sintoma a vigiar é um gap que o próprio
+agente documenta e em seguida fecha, tratando a lista de pendências dele como se fosse escopo do
+projeto.
 
 ---
 

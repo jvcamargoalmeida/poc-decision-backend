@@ -119,13 +119,8 @@ As duas rotas de negócio exigem *bearer token* — sem credencial válida respo
 
 | Rota | Credencial |
 | --- | --- |
-| `POST /transactions` | `API_CLIENTS` (credencial por cliente) ou `API_AUTH_TOKEN` |
+| `POST /transactions` | `API_AUTH_TOKEN` (clientes da API) |
 | `PATCH /callback/transactions` | `CALLBACK_AUTH_TOKEN` (n8n) |
-
-`API_CLIENTS` aceita pares `id:token,id:token`. Com ela, o hook resolve **qual** cliente chamou e o
-audit log passa a registrar `clientId` — a trilha responde *quem* pediu, não só *o que* aconteceu —,
-e revogar um cliente não derruba os outros. Sem ela, o `API_AUTH_TOKEN` vale como cliente único
-`default`: autentica igual, só sem atribuição de identidade.
 
 Os segredos são separados de propósito: cliente e n8n são atores distintos, então o vazamento de um não concede acesso ao outro. Ambos são comparados em tempo constante (`crypto.timingSafeEqual` sobre o hash SHA-256, para não vazar informação por timing nem pelo comprimento do token). Não há dependência externa: só o `crypto` nativo do Node.
 

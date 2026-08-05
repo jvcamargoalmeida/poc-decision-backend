@@ -93,16 +93,12 @@ Acompanhamento das entregas e fases de implementação da Prova de Conceito (PoC
 - [x] Validado com **20 requisições verdadeiramente concorrentes** (`curl --parallel`) com a mesma chave: 20 respostas com **1 único id**, **1 linha** no banco e **7 corridas** resolvidas pela constraint — o caminho que, sem tratamento, viraria `500`.
 - [x] **Migração em ambiente existente** (o init script só roda em volume novo): `ALTER TABLE transactions ADD (idempotency_key VARCHAR2(64));` e `CREATE UNIQUE INDEX ux_transactions_idempotency_key ON transactions (idempotency_key);`
 
-### Autenticação, identidade e proteção contra abuso (RNF08, RNF12)
+### Autenticação e proteção contra abuso (RNF08)
 
 - [x] `POST /transactions` passou a exigir *bearer token*, com segredo **separado** do callback: cliente da API e n8n são atores distintos, então o vazamento de um não concede acesso ao outro.
 - [x] Rate limiting por IP (janela fixa, em memória, sem dependência nova) nas duas rotas de negócio, com `429` + `Retry-After` e headers `X-RateLimit-*`. `GET /health` segue livre, por ser alvo de monitoração. O contador roda no estágio `onRequest`, **antes** da verificação de credencial — senão daria para brutar credencial sem limite.
   - **Limitações assumidas**: o estado vive no processo, então com várias instâncias o teto efetivo vira `max × instâncias` (em cluster exigiria Redis). O bucket é por IP e compartilhado entre as rotas.
-- [x] Credencial **por cliente** via `API_CLIENTS` (`id:token,id:token`): o hook resolve *qual* cliente chamou e o `clientId` flui até o campo indexado do documento de auditoria. Revogar um cliente deixou de derrubar os outros.
-  - A lista é percorrida **inteira** mesmo após achar o par correto: sair no primeiro acerto faria o tempo variar com a posição do cliente, devolvendo pela porta dos fundos o vazamento por *timing* que o `safeCompare` evita.
-  - Sem `API_CLIENTS`, o `API_AUTH_TOKEN` vale como cliente único `default` — o que manteve teste de carga, CI e Postman funcionando sem reconfiguração.
 - [x] **Bypass de decisão via webhook do n8n** fechado: o node `Webhook` exige *Header Auth*. Antes, quem alcançasse o container do n8n na rede postava direto no webhook e fazia o n8n — que possui a credencial válida do callback — alterar o status de qualquer transação.
-- [x] Validado ponta a ponta: dois clientes com tokens distintos gravaram `clientId` distintos no Mongo; token desconhecido recebeu `401`; sem `API_CLIENTS` a ingestão respondeu `201` como `default`.
 
 ### Não perda de mensagem (RNF10, RNF11)
 
@@ -135,12 +131,36 @@ O RabbitMQ **não altera argumento de fila já criada** — o app não sobe (`40
 
 ### Cobertura ao fim desta fase
 
-- [x] **156 testes, 100% nas quatro métricas** (statements, branches, functions, lines) — bem acima do gate de 95%.
-- [x] Os componentes novos desta fase concentram 37 desses testes: `retry.ts` (topologia, parsing da configuração, contagem de tentativas, tradução do `406`) e `bearer-auth.ts` (parsing de `API_CLIENTS`, resolução de identidade, rejeição sem herdar `clientId`).
+- [x] **143 testes, 100% nas quatro métricas** (statements, branches, functions, lines) — bem acima do gate de 95%.
+- [x] `retry.ts` concentra 18 deles: topologia das filas de espera, parsing da configuração, contagem de tentativas e tradução do `406` do broker em instrução acionável.
 - [x] Testes de retry nos dois workers cobrem os três desfechos: reagendar em falha transitória, descartar quando o orçamento acaba, e não gastar tentativa em erro definitivo.
 
 ### Continua em aberto
 
-- **`clientId` é atribuição, não autorização**: todo cliente válido pode tudo. Escopo por cliente (quais operações, quais limites) exigiria um modelo de permissão, e o rate limit segue por IP, não por cliente.
+- **A auditoria não atribui identidade**: o token de ingestão é um segredo compartilhado, então o audit log registra *o que* aconteceu, não *qual cliente* pediu. Ver a nota de escopo abaixo — isso é limite assumido, não pendência.
 - **Auditoria é registro único por transação**: `transactionId` é `unique` na coleção, então auditar eventos posteriores (a mudança de status, por exemplo) falharia por chave duplicada. Virar trilha de eventos exige remover a unicidade ou compô-la com o tipo de evento.
 - **Sem *outbox pattern***: uma falha do `publish` na ingestão não é recuperável pelo retry, porque a mensagem nunca chegou ao broker.
+
+## Nota de Escopo: identidade por cliente, construída e removida
+
+A especificação original desta PoC tem **RF01–RF08 e RNF01–RNF05**. Boa parte dos requisitos que
+apareceram depois nasceu de origem legítima — RF09 e RF10 foram pedidos diretos, RNF06 e RNF07
+estavam nas fases planejadas, e RNF10/RNF11 vieram de uma falha **medida** no teste de carga
+(7.866 mensagens perdidas em 30s).
+
+A atribuição de identidade por cliente (`API_CLIENTS`, `clientId` no audit log) **não** tinha essa
+origem. Ela nasceu de um gap que foi documentado e depois fechado dentro do próprio ciclo de
+trabalho, sem nunca ter sido pedida nem ter relação com o objetivo declarado da PoC — *comprovar
+estabilidade sob alta volumetria*. Credencial por cliente não torna o sistema mais estável sob
+carga; torna o projeto maior.
+
+Chegou a ser implementada por inteiro (hook que resolvia o cliente em tempo constante, `clientId`
+atravessando as quatro camadas até um campo indexado no Mongo, 13 testes, validada ponta a ponta) e
+foi **removida**. O motivo é o que importa registrar: um requisito escrito *depois* do código, para
+justificar o código, não é requisito — é racionalização. O `CLAUDE.md` define a
+[`SPECIFICATION.md`](SPECIFICATION.md) como fonte de verdade, e essa direção só funciona num
+sentido.
+
+O que fica no lugar é o limite assumido: **a trilha de auditoria responde *o que* aconteceu, não
+*quem* pediu.** Resolver isso de verdade exigiria credencial por consumidor e um modelo de
+permissão junto — trabalho de produto, não de PoC.

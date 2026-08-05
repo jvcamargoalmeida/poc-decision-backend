@@ -30,7 +30,13 @@ Este documento descreve as capacidades do sistema, suas restrições arquitetura
 - **RNF09 - *Backpressure* na Decisão Externa:** O sistema não deve submeter o orquestrador externo a mais carga do que ele sustenta. Quando o orquestrador for interno e capaz de consumir do broker, o transporte por fila deve ser preferido, para que o ritmo seja ditado pelo consumidor (*pull*) e não pelo produtor (*push*).
 - **RNF10 - Não Perda de Mensagem:** Toda fila deve declarar *dead-letter exchange*. Uma mensagem rejeitada — payload inválido, transação inexistente, falha do orquestrador — vai para a fila morta com o motivo preservado no header `x-death`, nunca é descartada silenciosamente.
 - **RNF11 - Retry com *Backoff* antes do Descarte:** Falha transitória (indisponibilidade do orquestrador ou do banco) deve gerar nova tentativa com espera crescente antes de a mensagem ir para a fila morta. A espera é responsabilidade do *broker* (fila sem consumidor com `x-message-ttl`), não de temporizador na aplicação, para que a mensagem sobreviva à queda do processo. Falha definitiva — contrato violado, payload malformado, transação inexistente — não deve consumir tentativa.
-- **RNF12 - Atribuição de Identidade:** A trilha de auditoria deve registrar *qual cliente* originou cada transação, não apenas o que aconteceu. Isso exige credencial por cliente, para que revogar um não derrube os demais. A comparação continua em tempo constante e percorre a lista inteira, para a posição do cliente não vazar por *timing*.
+
+> **Fora de escopo, deliberadamente:** identidade por cliente na trilha de auditoria. O audit log
+> registra *o que* aconteceu, não *qual cliente* pediu — o token de ingestão é um segredo
+> compartilhado. Resolver isso exigiria credencial por consumidor (ou JWT com `sub`) e um modelo de
+> permissão, o que não tem relação com o objetivo desta PoC (estabilidade sob alta volumetria).
+> Chegou a ser implementado e foi **removido** por ser desvio de escopo — ver nota no
+> [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
@@ -122,7 +128,6 @@ caminho feliz.
 | **RNF07** — Encerramento gracioso | `src/infrastructure/lifecycle/graceful-shutdown.ts` | ordem de teardown declarada em `src/server.ts` |
 | **RNF09** — *Backpressure* | `src/server.ts` (chave `DECISION_TRANSPORT`) | não é código novo: é a escolha de quem consome a fila |
 | **RNF10 / RNF11** — DLQ e retry | `src/infrastructure/messaging/rabbitmq/retry.ts` | topologia das filas de espera, `RetryScheduler` e `NonRetryableError`; consumido no branch de erro dos dois workers |
-| **RNF12** — Atribuição de identidade | `bearer-auth.ts` → `TransactionController` → `ProcessTransactionUseCase` → `MongoAuditRepository` | `clientId` atravessa as quatro camadas até o campo indexado do audit log |
 | **RF09** — Idempotência | `OracleTransactionRepository` (índice único + tradução do `ORA-00001`) e `ProcessTransactionUseCase` (curto-circuito e recuperação de corrida) | quem garante unicidade é o banco, não a verificação prévia |
 
 O tratamento de erro global (`src/presentation/middlewares/error-handler.ts`) é o que converte os

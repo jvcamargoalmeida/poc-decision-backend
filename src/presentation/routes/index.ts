@@ -6,7 +6,7 @@ import { registerCallbackRoutes } from '@/presentation/routes/callback.routes';
 import { buildTransactionController, buildCallbackController } from '@/presentation/container';
 import { type Channel } from 'amqplib';
 import { Connection } from 'mongoose';
-import type { BearerAuthHook, ClientAuthHook } from '@/presentation/middlewares/bearer-auth';
+import type { BearerAuthHook } from '@/presentation/middlewares/bearer-auth';
 import type { RateLimitHook } from '@/presentation/middlewares/rate-limit';
 
 
@@ -16,7 +16,7 @@ export async function registerRoutes(
   channel: Channel,
   mongoClient: Connection,
   callbackAuthHook: BearerAuthHook,
-  apiAuthHook: ClientAuthHook,
+  apiAuthHook: BearerAuthHook,
   rateLimitHook: RateLimitHook,
 ): Promise<void> {
   await app.register(healthPlugin);

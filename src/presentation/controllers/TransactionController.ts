@@ -17,12 +17,7 @@ class TransactionController {
   ): Promise<void> => {
     const { amount, currency } = request.body;
     const idempotencyKey = request.headers['idempotency-key'] as string | undefined;
-    const transaction = await this.processTransactionUseCase.execute(
-      amount,
-      currency,
-      idempotencyKey,
-      request.clientId,
-    );
+    const transaction = await this.processTransactionUseCase.execute(amount, currency, idempotencyKey);
     await reply.status(201).send(transaction);
   };
 }

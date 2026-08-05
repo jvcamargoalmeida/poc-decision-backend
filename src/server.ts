@@ -11,7 +11,7 @@ import { DecisionResultWorker } from '@/infrastructure/messaging/rabbitmq/worker
 import { RetryScheduler, assertRetryTopology, parseRetryDelays } from '@/infrastructure/messaging/rabbitmq/retry';
 import { buildUpdateTransactionStatusUseCase } from '@/presentation/container';
 import { N8nWebhookClient } from './infrastructure/external/n8n/N8nWebhookClient';
-import { createBearerAuthHook, createClientAuthHook, parseApiClients } from '@/presentation/middlewares/bearer-auth';
+import { createBearerAuthHook } from '@/presentation/middlewares/bearer-auth';
 import { createRateLimitHook } from '@/presentation/middlewares/rate-limit';
 import { registerGracefulShutdown } from '@/infrastructure/lifecycle/graceful-shutdown';
 
@@ -121,19 +121,13 @@ async function bootstrap(): Promise<void> {
     windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
   });
 
-  const apiClients = parseApiClients(process.env.API_CLIENTS, apiAuthToken);
-  logger.info('Credenciais de ingestão carregadas', {
-    clientes: apiClients.map((cliente) => cliente.id),
-    identidadeAtribuida: apiClients.some((cliente) => cliente.id !== 'default'),
-  });
-
   await registerRoutes(
     app,
     oraclePool,
     rabbitChannel,
     mongoClient.connection,
     createBearerAuthHook(callbackAuthToken),
-    createClientAuthHook(apiClients),
+    createBearerAuthHook(apiAuthToken),
     rateLimitHook,
   );
 
