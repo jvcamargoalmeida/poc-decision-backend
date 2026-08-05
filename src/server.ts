@@ -56,13 +56,6 @@ async function bootstrap(): Promise<void> {
     await rabbitChannel.assertQueue(decisionRequestsQueue, { durable: true, deadLetterExchange });
     await rabbitChannel.assertQueue(decisionResultsQueue, { durable: true, deadLetterExchange });
 
-    // As filas existem sempre, mas só o transporte ativo fica ligado à exchange.
-    // Manter as duas ligadas a `transaction.created` não é só desperdício de
-    // memória do broker: a fila sem consumidor acumula pedidos que o outro
-    // transporte já decidiu, e ao voltar para ele o worker drenaria esse acúmulo
-    // pedindo decisão de novo para transação já decidida.
-    // `unbindQueue` é no-op quando o vínculo não existe, então repetir o boot no
-    // mesmo modo é seguro.
     const [filaAtiva, filaOciosa] = decisionTransport === 'queue'
       ? [decisionRequestsQueue, transactionsQueue]
       : [transactionsQueue, decisionRequestsQueue];

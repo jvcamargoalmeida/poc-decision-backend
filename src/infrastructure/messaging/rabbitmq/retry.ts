@@ -52,9 +52,6 @@ async function assertRetryTopology(
         deadLetterRoutingKey: sourceQueue,
       });
     } catch (error) {
-      // O RabbitMQ recusa redeclarar fila com argumento diferente do vigente, e o
-      // erro cru do driver não diz o que fazer. Mudar RETRY_DELAYS_MS num ambiente
-      // que já subiu cai exatamente aqui.
       if ((error as { code?: number }).code === 406) {
         throw new Error(
           `Fila de retry '${queue}' já existe com atraso diferente do configurado (${delaysMs[level]}ms). ` +
