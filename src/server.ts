@@ -51,16 +51,33 @@ async function bootstrap(): Promise<void> {
 
     await rabbitChannel.assertExchange('amq.topic', 'topic', { durable: true });
     await rabbitChannel.assertQueue(transactionsQueue, { durable: true, deadLetterExchange });
-    await rabbitChannel.bindQueue(transactionsQueue, 'amq.topic', 'transaction.created');
-
     await rabbitChannel.assertQueue(decisionRequestsQueue, { durable: true, deadLetterExchange });
-    await rabbitChannel.bindQueue(decisionRequestsQueue, 'amq.topic', 'transaction.created');
     await rabbitChannel.assertQueue(decisionResultsQueue, { durable: true, deadLetterExchange });
-    await rabbitChannel.bindQueue(decisionResultsQueue, 'amq.topic', 'transaction.decided');
+
+    // As filas existem sempre, mas só o transporte ativo fica ligado à exchange.
+    // Manter as duas ligadas a `transaction.created` não é só desperdício de
+    // memória do broker: a fila sem consumidor acumula pedidos que o outro
+    // transporte já decidiu, e ao voltar para ele o worker drenaria esse acúmulo
+    // pedindo decisão de novo para transação já decidida.
+    // `unbindQueue` é no-op quando o vínculo não existe, então repetir o boot no
+    // mesmo modo é seguro.
+    const [filaAtiva, filaOciosa] = decisionTransport === 'queue'
+      ? [decisionRequestsQueue, transactionsQueue]
+      : [transactionsQueue, decisionRequestsQueue];
+
+    await rabbitChannel.bindQueue(filaAtiva, 'amq.topic', 'transaction.created');
+    await rabbitChannel.unbindQueue(filaOciosa, 'amq.topic', 'transaction.created');
+
+    if (decisionTransport === 'queue') {
+      await rabbitChannel.bindQueue(decisionResultsQueue, 'amq.topic', 'transaction.decided');
+    } else {
+      await rabbitChannel.unbindQueue(decisionResultsQueue, 'amq.topic', 'transaction.decided');
+    }
 
     logger.info('Transporte de decisão configurado', {
       transport: decisionTransport,
-      filaDePedidos: decisionTransport === 'queue' ? decisionRequestsQueue : transactionsQueue,
+      filaDePedidos: filaAtiva,
+      filaDesligada: filaOciosa,
     });
 
     if (decisionTransport === 'http') {

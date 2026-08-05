@@ -349,16 +349,24 @@ flowchart LR
 Uma única exchange `amq.topic` (durável) e três filas, todas com
 `x-dead-letter-exchange` apontando para `transactions.queue.dlx`:
 
-| Fila | Routing key | Consumidor |
-| --- | --- | --- |
-| `transactions.queue` | `transaction.created` | `TransactionWorker` (modo `http`) |
-| `transactions.queue.decision.requests` | `transaction.created` | n8n, via *RabbitMQ Trigger* |
-| `transactions.queue.decision.results` | `transaction.decided` | `DecisionResultWorker` (modo `queue`) |
+| Fila | Routing key | Consumidor | Ligada no modo |
+| --- | --- | --- | --- |
+| `transactions.queue` | `transaction.created` | `TransactionWorker` | `http` |
+| `transactions.queue.decision.requests` | `transaction.created` | n8n, via *RabbitMQ Trigger* | `queue` |
+| `transactions.queue.decision.results` | `transaction.decided` | `DecisionResultWorker` | `queue` |
+| `transactions.queue.dead` | — (fanout da DLX) | nenhum — inspeção manual | ambos |
 
 Como as filas se ligam por *routing key* e não por destinatário, o `RabbitMQPublisher` **não sabe
 qual transporte está ativo** — ele publica `transaction.created` do mesmo jeito nos dois modos, e
 quem muda é só quem está escutando. Trocar de transporte não tocou uma linha do publisher nem do
 caso de uso.
+
+**O vínculo é condicional ao transporte ativo.** As três filas são declaradas sempre (duráveis,
+com a mesma DLX), mas o bootstrap liga à exchange só a fila que o modo atual consome e desliga a
+do outro. Deixar as duas ligadas parece inofensivo — "a fila sem consumidor só acumula" —, mas o
+`TransactionWorker` pede decisão ao n8n para **toda** mensagem que consome: ao voltar para `http`,
+ele drenaria o acúmulo pedindo decisão de novo para transação já decidida, sobrescrevendo status
+final. O `unbindQueue` é no-op quando o vínculo não existe, então o bootstrap continua idempotente.
 
 ### Qual usar
 
@@ -371,10 +379,11 @@ O `.env.example`, porém, já vem com `DECISION_TRANSPORT=queue`, porque nesta P
 saturação que o teste de carga mediu. Ou seja: o padrão do *código* é o seguro, o padrão do
 *ambiente local* é o correto para esta topologia.
 
-**Custo assumido do modo `queue`:** `transactions.queue` continua ligada a `transaction.created`,
-mas ninguém a consome quando o `TransactionWorker` não sobe — ela acumula mensagens até o modo
-`http` voltar. É desperdício de memória do broker, não perda de dado, e mantém a troca de
-transporte reversível sem perder o que chegou no intervalo. Registrado como gap no
+**Trocar de transporte exige reiniciar a aplicação**, já que a topologia é declarada no bootstrap.
+A troca em si não perde mensagem: as filas continuam duráveis nos dois modos, só o vínculo com a
+exchange muda. O que **não** é reversível sozinho é um acúmulo anterior — uma fila que ficou com
+mensagens de antes do vínculo condicional precisa ser esvaziada uma vez
+(`rabbitmqctl purge_queue`), senão o worker do modo de destino drena histórico já decidido. Ver
 [`ROADMAP.md`](ROADMAP.md).
 
 ## 4. Modelo de Dados (DER)

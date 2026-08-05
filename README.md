@@ -139,7 +139,9 @@ host é `rabbitmq`, não `localhost`. Nesse modo somem o webhook e a rota de cal
 controle de acesso à mudança de status passa a ser do RabbitMQ, não do *bearer token*.
 
 Trocar o valor exige reiniciar a aplicação — a topologia das filas é declarada no bootstrap. As
-filas em si já existem nos dois modos, então a troca não perde mensagem.
+filas em si existem e são duráveis nos dois modos; o que muda é qual delas fica ligada à exchange.
+Só o transporte ativo recebe `transaction.created`, para que a fila do transporte ocioso não
+acumule pedidos que o outro já decidiu.
 
 ## 📚 Documentação
 

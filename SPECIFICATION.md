@@ -85,9 +85,9 @@ são idênticas às acima — o `RabbitMQPublisher` publica `transaction.created
 saber qual transporte está ativo. O que muda é quem escuta.
 
 ### Fase C′: O n8n Consome (em vez de ser chamado)
-1. **Consumo pelo Orquestrador:** o próprio n8n mantém um consumidor ativo na fila de pedidos `transactions.queue.decision.requests`, ligada a `amq.topic` pela routing key `transaction.created`. O `TransactionWorker` e o `N8nWebhookClient` **não são instanciados** neste modo.
+1. **Consumo pelo Orquestrador:** o próprio n8n mantém um consumidor ativo na fila de pedidos `transactions.queue.decision.requests`, ligada a `amq.topic` pela routing key `transaction.created`. O `TransactionWorker` e o `N8nWebhookClient` **não são instanciados** neste modo, e `transactions.queue` fica **desligada** da exchange — só o transporte ativo recebe o evento, para que a fila ociosa não acumule pedidos que o outro transporte já decidiu.
    - *Artefato:* `n8n-workflows/fraud-analysis-queue.json` (node *RabbitMQ Trigger*)
-   - *Arquivo:* topologia declarada em `src/server.ts`
+   - *Arquivo:* topologia e vínculo condicional declarados em `src/server.ts`
 
 ### Fase D′: Decisão e Publicação do Resultado
 1. **Processamento Visual:** mesmo `If` sobre `riskScore` do fluxo de webhook, lendo `$json.data.riskScore` — o envelope `{ eventName, timestamp, data }` chega igual pela fila.
